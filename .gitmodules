@@ -1,0 +1,6 @@
+[submodule "Diffusion-Project-Illumination"]
+	path = Diffusion-Project-Illumination
+	url = git@github.com:KAIST-Visual-AI-Group/Diffusion-Project-Illumination.git
+[submodule "DiLightNet"]
+	path = DiLightNet
+	url = git@github.com:iamNCJ/DiLightNet.git
