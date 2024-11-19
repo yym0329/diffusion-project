@@ -75,6 +75,7 @@ def render_hint_images(model_path, fov, pls, power=500., geo_smooth=True, output
         output_folder = tempfile.mkdtemp()
     for i in tqdm(range(len(pls)), desc='Rendering Hints'):
         if env_map:
+            # TODO env map check
             z_angle = (i / len(pls) + env_start_azi) * np.pi * 2.
             set_env_light(env_map, rotation_euler=[0, 0, z_angle])
         else:
