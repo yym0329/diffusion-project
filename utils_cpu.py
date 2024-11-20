@@ -49,11 +49,17 @@ def make_jsonl(output_path, data_dir):
 
 
 # Use this function to preprocess data
-def center_crop_img(tgt_img_path, mask_img_path):
+def center_crop_img(tgt_img_path, mask_img_path, resoultion:float = 1.0):
     # DO NOT modify the hyperparameters
-    RESIZE_H, RESIZE_W = 100, 100
-    H, W = 128, 128
-
+    if resoultion == 1.0:
+        RESIZE_H, RESIZE_W = 100, 100
+        H, W = 128, 128
+    elif resoultion == 4.0:
+        RESIZE_H, RESIZE_W = 400, 400
+        H, W = 512, 512
+    else:
+        raise ValueError("Invalid resolution value. Please use 1.0 or 4.0")
+    
     """
     Preprocess the image and mask to center crop and resize to 128x128
 
@@ -112,7 +118,7 @@ def center_crop_img(tgt_img_path, mask_img_path):
     return img_canvas, mask_canvas
 
 
-def process_image(data_dict: Dict[str, str], output_dir: str):
+def process_image(data_dict: Dict[str, str], output_dir: str, resoultion:float = 1.0):
     """
     crop the object image given the mask. and save the cropped image and mask to the output directory.
 
@@ -130,7 +136,7 @@ def process_image(data_dict: Dict[str, str], output_dir: str):
     tgt_img_path = data_dict["image_path"]
     mask_img_path = data_dict["mask_path"]
     
-    img, mask = center_crop_img(tgt_img_path, mask_img_path)
+    img, mask = center_crop_img(tgt_img_path, mask_img_path, resoultion=resoultion)
 
     img_name = k + ".png"
     # key example: 'obj_28_metal_bucket_010_NA3'

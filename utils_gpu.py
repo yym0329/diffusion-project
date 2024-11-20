@@ -14,6 +14,8 @@ import cv2
 import simple_parsing
 from transformers import pipeline
 
+from easydict import EasyDict
+
 from typing import Dict
 
 # internal Libs
@@ -46,7 +48,6 @@ class Args:
         None  # Field of view for the mesh reconstruction, none for auto estimation from the image
     )
 
-    mask_path: Optional[str] = None  # Path to the mask for the image
     use_sam: bool = True  # Use SAM for background removal
     mask_threshold: float = 25.0  # Mask threshold for foreground object extraction
 
@@ -57,11 +58,12 @@ class Args:
     pl_y: float = 1.0  # Y position of the point light
     pl_z: float = 1.0  # Z position of the point light
 
+    mask_path: Optional[str] = None  # Path to the mask for the image
     env_map_path: Optional[str] = None  # Path to the environment map
 
 
 # elem function
-def generate_hint(
+def _generate_hint(
     img,
     seed=3407,
     fov=None,
@@ -89,10 +91,12 @@ def generate_hint(
         pl_z=pl_z,
     )
 
+    # mask 관련 implementations
     # Load input image and generate/load mask
     input_image = imageio.v3.imread(args.img)
     input_image = cv2.resize(input_image, (512, 512))
 
+    assert args.mask_path is not None, "mask_path should be given"
     if args.mask_path:
         # 이건 explicit하게 주면 될듯 하다.
         mask = imageio.v3.imread(args.mask_path)
@@ -120,19 +124,77 @@ def generate_hint(
     # TODO: explicit하게 mesh를 주면 좋을 것이다. 결과적으로 우리가 할 것은 PSNR을 높히는 것이고, 사용하면 안되는 것은 오직 eval image pairs이다.
     mesh, fov = mesh_reconstruction(input_image, mask, False, fov, args.mask_threshold)
     print(f"Mesh reconstructed with fov: {fov}")
+    
+    # render hints
+    # explicit하게 env_map을 주어야 한다. 이미 있다..!
     render_hint_images(
         mesh,
         fov,
         pls,
-        args.power,
+        env_map=args.env_map_path,
         output_folder=output_folder,
         use_gpu=args.use_gpu_for_rendering,
     )
     print(f"Radiance hints rendered to {output_folder}")
 
+def elem_generate_hint(args: dict):
+    """
+    args.image_path
+    args.mask_path
+    args.viewpoint_id
+    args.lighting_condition_id
+    args.image_id  # key
+    args.output_dir  # processed root dir
+    args.fov = None  # 그러면 mesh_reconstruction에서 계산하게 된다.
+    args.mask_threshold: float = 0.25  #    
+    args.env_map  # path to hdf
+    args.pls = [[0,0,0]]  # euler angle로 environmental map을 회전하는 것이다.
+    args.use_gpu_for_rendering = True  # 무조건
+    args.resolution = 128  # resolution of the image
+    """
+    
+    args = EasyDict(args)  # dict to EasyDict
+        
+    image_path = args.image_path
+    mask_path = args.mask_path
+    image_id = args.image_id
+    viewpoint_id = args.viewpoint_id
+    lighting_condition_id = args.lighting_condition_id
+
+    # Load the image and mask
+    image = imageio.imread(image_path)
+    mask = imageio.imread(mask_path)
+
+    # env map
+    # env_map = get_envmap(viewpoint_id, lighting_condition_id)
+    
+    # Create a mesh from the image and mask
+
+    output_folder = os.path.join(args.output_dir, image_id, viewpoint_id, lighting_condition_id)
+    if not os.path.exists(output_folder):
+        os.makedirs(output_folder)
+
+    print(
+        f"Rendering radiance hints for {image_path} with viewpoint {viewpoint_id} and lighting condition {lighting_condition_id}"
+    )
+    # Mesh reconstruction and fov estimation for hints rendering
+    fov = args.fov
+    mesh, fov = mesh_reconstruction(image, mask, False, fov, args.mask_threshold)
+    # TODO make mesh from colmap maybe better?
+    print(f"Mesh reconstructed with fov: {fov}")
+    render_hint_images(
+        mesh,
+        fov,
+        env_map=args.env_map,
+        pls=args.pls,
+        output_folder=output_folder,
+        resolution=args.resolution
+        use_gpu=args.use_gpu_for_rendering,
+    )
+    print(f"Radiance hints rendered to {output_folder}")
 
 # wrapper
-def generate_hints(json_path: str, output_dir: str, gpus=["0"]):
+def _generate_hints(json_path: str, output_dir: str, gpus=["0"]):
     """
     1. load json file
     2. split the (image, mask) pairs into chunks to distribute to GPUs

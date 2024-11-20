@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from typing import List, Dict
+from typing import List, Dict, Optional
 import json
 import os
 
@@ -12,10 +12,20 @@ class DataSetDefinition:
     light_condition_path_list, openillumnination 저자 제공 env map을 사용 하는 것으로 한다.
 
     """
+    
+    processed_dir_suffix: Optional[str] = None 
+    resolution_4x: bool = False
+    if resolution_4x:
+        resolution = 512
+    else:
+        resolution = 128
 
     raw_data_root_dir: str = field(default="./data/lighting_patterns")
-    processed_data_root_dir: str = field(default="./data/processed")
-    split: List[str] = field(default_factory=lambda: ["train", "val"])
+    if processed_dir_suffix is None:
+        processed_data_root_dir: str = field(default="./data/processed")
+    else:
+        processed_data_root_dir: str = field(default=os.path.join("./data/processed", processed_dir_suffix))
+    split: List[str] = field(default_factory=lambda: ["train", "eval"])
 
     # object classes, available view points
     data_definition_json_path: str = field(default="./data/data.json")
@@ -95,6 +105,10 @@ class DataSetDefinition:
         split = self.step1_split_generator()
         self.step1_datadict_train_list = split["train"]
         self.step1_datadict_eval_list = split["eval"]
+    
+    def get_step2_json(self):
+        split = self.step2_dict_generator()
+        return split
 
     @classmethod
     def get_image_path(
@@ -137,6 +151,10 @@ class DataSetDefinition:
         # Nope. 이것도 해야 한다.
 
     def step1_split_generator(self):
+        """
+        cropping and train test split
+        
+        """
         step1_datadict_train_list = []
         step1_datadict_eval_list = []
         for each_class_name in self.class_name_list:
@@ -174,10 +192,78 @@ class DataSetDefinition:
                     else:
                         step1_datadict_train_list.append(
                             {
-                                "key": f"{each_class_name}_{each_light_condition}_          {each_view_point}",
+                                "key": f"{each_class_name}_{each_light_condition}_{each_view_point}",
                                 "image_path": image_path,
                                 "mask_path": mask_path,
                             }
                         )
 
         return {"train": step1_datadict_train_list, "eval": step1_datadict_eval_list}
+
+    def step2_dict_generator(self, resolution_4x: bool = False):
+        """
+        args.image_path
+        args.mask_path
+        args.viewpoint_id
+        args.lighting_condition_id
+        args.image_id  # key
+        args.output_dir  # processed root dir
+        args.fov = None  # 그러면 mesh_reconstruction에서 계산하게 된다.
+        args.mask_threshold: float = 0.25  #    
+        args.env_map  # path to hdf
+        args.pls = [[0,0,0]]  # euler angle로 environmental map을 회전하는 것이다.
+        args.use_gpu_for_rendering = True  # 무조건
+        
+        """
+        
+        step2_datadict_train_list = []
+        step2_datadict_eval_list = []
+        
+        datadict_list ={
+            "train": [],
+            "eval": []
+        }
+        
+        # /data1/common_datasets/openillumination/processed/train/images/obj_01_car/
+        # /data1/common_datasets/openillumination/processed/train/masks/obj_01_car/obj_01_car_CA2.png
+        
+        # step 3에서 viewpoint별로 정렬 해주고, 013에 대해서 가장 object 식별하기 좋아서 이걸로 해줘야 겠다.
+        
+        for each_split in self.split:
+            for each_class in self.class_name_list:
+                if resolution_4x:
+                    root_dir = os.path.join(self.processed_data_root_dir, "4x")
+                else:
+                    root_dir = self.processed_data_root_dir
+                class_dir = os.path.join(root_dir, each_split, "images", each_class)
+                path_list = os.listdir(class_dir)
+                for each_image_path in path_list:
+                    base_name = os.path.basename(each_image_path)
+                    base_name = os.path.splitext(base_name)[0]
+
+                    view_point = base_name.split("_")[-1]
+                    light_condition = base_name.split("_")[-2]
+                    image_id = base_name.split("_")[0] + "_" + base_name.split("_")[1] + "_" + base_name.split("_")[2]
+                    
+                    mask_path = os.path.join(
+                        root_dir, each_split, "masks", each_class, 
+                        f"{each_class}_{view_point}.png"
+                    )
+                    datadict_list[each_split].append(
+                        {
+                            "image_path": os.path.join(class_dir, each_image_path),
+                            "mask_path": mask_path,
+                            "viewpoint_id": view_point,
+                            "lighting_condition_id": light_condition,
+                            "image_id": image_id,
+                            "output_dir": os.path.join(root_dir, each_split, "hints"),
+                            "fov": None,
+                            "mask_threshold": 0.25,
+                            "env_map": self.light_condition_path_list[light_condition],
+                            "pls": [[0,0,0]],
+                            "use_gpu_for_rendering": True,
+                            "resolution": self.resolution
+                        }
+                    )
+        return datadict_list
+        
