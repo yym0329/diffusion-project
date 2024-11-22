@@ -50,10 +50,11 @@ from tqdm.auto import tqdm
 from transformers import AutoTokenizer, PretrainedConfig
 
 from relighting_dataset import RelightingDataset
+
 NeuralTextureControlNetModel = get_class_from_dynamic_module(
     "dilightnet/model_helpers",
     "neuraltexture_controlnet.py",
-    "NeuralTextureControlNetModel"
+    "NeuralTextureControlNetModel",
 )
 
 if is_wandb_available():
@@ -73,8 +74,19 @@ def image_grid(imgs, rows, cols):
     return grid
 
 
-def log_validation(vae, text_encoder, tokenizer, unet, controlnet, args, accelerator, weight_dtype, step, val_dataset,
-                   test_dataset):
+def log_validation(
+    vae,
+    text_encoder,
+    tokenizer,
+    unet,
+    controlnet,
+    args,
+    accelerator,
+    weight_dtype,
+    step,
+    val_dataset,
+    test_dataset,
+):
     logger.info("Running validation... ")
     torch.cuda.empty_cache()
 
@@ -91,8 +103,10 @@ def log_validation(vae, text_encoder, tokenizer, unet, controlnet, args, acceler
         revision=args.revision,
         torch_dtype=weight_dtype,
     )
-    pipeline.scheduler = UniPCMultistepScheduler.from_config(pipeline.scheduler.config,
-                                                             beta_schedule='linear' if args.linear_noise_scheduling else 'scaled_linear')
+    pipeline.scheduler = UniPCMultistepScheduler.from_config(
+        pipeline.scheduler.config,
+        beta_schedule="linear" if args.linear_noise_scheduling else "scaled_linear",
+    )
     pipeline = pipeline.to(accelerator.device)
     pipeline.set_progress_bar_config(disable=True)
 
@@ -110,33 +124,44 @@ def log_validation(vae, text_encoder, tokenizer, unet, controlnet, args, acceler
         dataset_to_use = val_dataset if idx < 4 else test_dataset
         i = random.randint(0, len(dataset_to_use))
         batch = dataset_to_use[i]
-        prompt = batch['text']
-        validation_image = torch.from_numpy(batch['conditioning_pixel_values']).to(accelerator.device)[None]
+        prompt = batch["text"]
+        validation_image = torch.from_numpy(batch["conditioning_pixel_values"]).to(
+            accelerator.device
+        )[None]
 
         images = []
 
         for _ in range(args.num_validation_images):
             with torch.autocast("cuda"):
                 image = pipeline(
-                    prompt, validation_image, num_inference_steps=20, generator=generator
+                    prompt,
+                    validation_image,
+                    num_inference_steps=20,
+                    generator=generator,
                 ).images[0]
 
             images.append(image)
 
-        cond_pixels = batch['conditioning_pixel_values']
+        cond_pixels = batch["conditioning_pixel_values"]
         if args.add_mask:
             cond_pixels = cond_pixels[1:]
         image_logs.append(
             {
-                "ref_textured_image": cond_pixels[:3, :, :].transpose(1, 2, 0).clip(0, 1),
-                "diffuse_hint_image": cond_pixels[3:6, :, :].transpose(1, 2, 0).clip(0, 1),
-                "ggx034_hint_image": cond_pixels[-3:, :, :].transpose(1, 2, 0).clip(0, 1),
-                "target_image": (batch['pixel_values'] / 2. + 0.5).transpose(1, 2, 0),
+                "ref_textured_image": cond_pixels[:3, :, :]
+                .transpose(1, 2, 0)
+                .clip(0, 1),
+                "diffuse_hint_image": cond_pixels[3:6, :, :]
+                .transpose(1, 2, 0)
+                .clip(0, 1),
+                "ggx034_hint_image": cond_pixels[-3:, :, :]
+                .transpose(1, 2, 0)
+                .clip(0, 1),
+                "target_image": (batch["pixel_values"] / 2.0 + 0.5).transpose(1, 2, 0),
                 "images": images,
                 "validation_prompt": prompt,
-                "target_filepath": batch['target_file'],
-                "ref_filepath": batch['ref_file'],
-                "model_id": batch['model_id'],
+                "target_filepath": batch["target_file"],
+                "ref_filepath": batch["ref_file"],
+                "model_id": batch["model_id"],
             }
         )
 
@@ -161,9 +186,13 @@ def log_validation(vae, text_encoder, tokenizer, unet, controlnet, args, acceler
 
                 formatted_images = np.stack(formatted_images)
 
-                tracker.writer.add_images(validation_prompt, formatted_images, step, dataformats="NHWC")
+                tracker.writer.add_images(
+                    validation_prompt, formatted_images, step, dataformats="NHWC"
+                )
         elif tracker.name == "wandb":
-            text_table = wandb.Table(columns=["steps", "target_file", "ref_file", "prompt"])
+            text_table = wandb.Table(
+                columns=["steps", "target_file", "ref_file", "prompt"]
+            )
             formatted_images = []
 
             for log in image_logs:
@@ -174,15 +203,27 @@ def log_validation(vae, text_encoder, tokenizer, unet, controlnet, args, acceler
                 ggx034_hint_image = log["ggx034_hint_image"]
                 target_image = log["target_image"]
                 model_id = log["model_id"]
-                text_table.add_data(step, log["target_filepath"], log["ref_filepath"], validation_prompt)
+                text_table.add_data(
+                    step, log["target_filepath"], log["ref_filepath"], validation_prompt
+                )
 
-                formatted_images.append(wandb.Image(ref_textured_image, caption="Reference textured image"))
-                formatted_images.append(wandb.Image(diffuse_hint_image, caption="Diffuse hint image"))
-                formatted_images.append(wandb.Image(ggx034_hint_image, caption="GGX 0.34 hint image"))
-                formatted_images.append(wandb.Image(target_image, caption="Target image"))
+                formatted_images.append(
+                    wandb.Image(ref_textured_image, caption="Reference textured image")
+                )
+                formatted_images.append(
+                    wandb.Image(diffuse_hint_image, caption="Diffuse hint image")
+                )
+                formatted_images.append(
+                    wandb.Image(ggx034_hint_image, caption="GGX 0.34 hint image")
+                )
+                formatted_images.append(
+                    wandb.Image(target_image, caption="Target image")
+                )
 
                 for image in images:
-                    image = wandb.Image(image, caption=(model_id + ' ' + validation_prompt))
+                    image = wandb.Image(
+                        image, caption=(model_id + " " + validation_prompt)
+                    )
                     formatted_images.append(image)
 
             tracker.log({"validation": formatted_images})
@@ -194,7 +235,9 @@ def log_validation(vae, text_encoder, tokenizer, unet, controlnet, args, acceler
     return image_logs
 
 
-def import_model_class_from_model_name_or_path(pretrained_model_name_or_path: str, revision: str):
+def import_model_class_from_model_name_or_path(
+    pretrained_model_name_or_path: str, revision: str
+):
     text_encoder_config = PretrainedConfig.from_pretrained(
         pretrained_model_name_or_path,
         subfolder="text_encoder",
@@ -211,7 +254,9 @@ def import_model_class_from_model_name_or_path(pretrained_model_name_or_path: st
 
 
 def parse_args(input_args=None):
-    parser = argparse.ArgumentParser(description="Simple example of a ControlNet training script.")
+    parser = argparse.ArgumentParser(
+        description="Simple example of a ControlNet training script."
+    )
     parser.add_argument(
         "--pretrained_model_name_or_path",
         type=str,
@@ -224,7 +269,7 @@ def parse_args(input_args=None):
         type=str,
         default=None,
         help="Path to pretrained controlnet model or model identifier from huggingface.co/models."
-             " If not specified controlnet weights are initialized from unet.",
+        " If not specified controlnet weights are initialized from unet.",
     )
     parser.add_argument(
         "--add_mask",
@@ -278,7 +323,9 @@ def parse_args(input_args=None):
         default="env_mix_linear",
         help="The exp id for wandb logging and output subfolder.",
     )
-    parser.add_argument("--seed", type=int, default=None, help="A seed for reproducible training.")
+    parser.add_argument(
+        "--seed", type=int, default=None, help="A seed for reproducible training."
+    )
     parser.add_argument(
         "--resolution",
         type=int,
@@ -289,7 +336,10 @@ def parse_args(input_args=None):
         ),
     )
     parser.add_argument(
-        "--train_batch_size", type=int, default=4, help="Batch size (per device) for the training dataloader."
+        "--train_batch_size",
+        type=int,
+        default=4,
+        help="Batch size (per device) for the training dataloader.",
     )
     parser.add_argument("--num_train_epochs", type=int, default=1)
     parser.add_argument(
@@ -358,7 +408,10 @@ def parse_args(input_args=None):
         ),
     )
     parser.add_argument(
-        "--lr_warmup_steps", type=int, default=500, help="Number of steps for the warmup in the lr scheduler."
+        "--lr_warmup_steps",
+        type=int,
+        default=500,
+        help="Number of steps for the warmup in the lr scheduler.",
     )
     parser.add_argument(
         "--lr_num_cycles",
@@ -366,9 +419,16 @@ def parse_args(input_args=None):
         default=1,
         help="Number of hard resets of the lr in cosine_with_restarts scheduler.",
     )
-    parser.add_argument("--lr_power", type=float, default=1.0, help="Power factor of the polynomial scheduler.")
     parser.add_argument(
-        "--use_8bit_adam", action="store_true", help="Whether or not to use 8-bit Adam from bitsandbytes."
+        "--lr_power",
+        type=float,
+        default=1.0,
+        help="Power factor of the polynomial scheduler.",
+    )
+    parser.add_argument(
+        "--use_8bit_adam",
+        action="store_true",
+        help="Whether or not to use 8-bit Adam from bitsandbytes.",
     )
     parser.add_argument(
         "--dataloader_num_workers",
@@ -378,11 +438,30 @@ def parse_args(input_args=None):
             "Number of subprocesses to use for data loading. 0 means that the data will be loaded in the main process."
         ),
     )
-    parser.add_argument("--adam_beta1", type=float, default=0.9, help="The beta1 parameter for the Adam optimizer.")
-    parser.add_argument("--adam_beta2", type=float, default=0.999, help="The beta2 parameter for the Adam optimizer.")
-    parser.add_argument("--adam_weight_decay", type=float, default=1e-2, help="Weight decay to use.")
-    parser.add_argument("--adam_epsilon", type=float, default=1e-08, help="Epsilon value for the Adam optimizer")
-    parser.add_argument("--max_grad_norm", default=1.0, type=float, help="Max gradient norm.")
+    parser.add_argument(
+        "--adam_beta1",
+        type=float,
+        default=0.9,
+        help="The beta1 parameter for the Adam optimizer.",
+    )
+    parser.add_argument(
+        "--adam_beta2",
+        type=float,
+        default=0.999,
+        help="The beta2 parameter for the Adam optimizer.",
+    )
+    parser.add_argument(
+        "--adam_weight_decay", type=float, default=1e-2, help="Weight decay to use."
+    )
+    parser.add_argument(
+        "--adam_epsilon",
+        type=float,
+        default=1e-08,
+        help="Epsilon value for the Adam optimizer",
+    )
+    parser.add_argument(
+        "--max_grad_norm", default=1.0, type=float, help="Max gradient norm."
+    )
     parser.add_argument(
         "--hub_model_id",
         type=str,
@@ -427,7 +506,9 @@ def parse_args(input_args=None):
         ),
     )
     parser.add_argument(
-        "--enable_xformers_memory_efficient_attention", action="store_true", help="Whether or not to use xformers."
+        "--enable_xformers_memory_efficient_attention",
+        action="store_true",
+        help="Whether or not to use xformers.",
     )
     parser.add_argument(
         "--set_grads_to_none",
@@ -486,7 +567,10 @@ def parse_args(input_args=None):
         ),
     )
     parser.add_argument(
-        "--image_column", type=str, default="image", help="The column of the dataset containing the target image."
+        "--image_column",
+        type=str,
+        default="image",
+        help="The column of the dataset containing the target image.",
     )
     parser.add_argument(
         "--conditioning_image_column",
@@ -597,17 +681,21 @@ def parse_args(input_args=None):
         raise ValueError("`--proportion_empty_prompts` must be in the range [0, 1].")
 
     if args.validation_prompt is not None and args.validation_image is None:
-        raise ValueError("`--validation_image` must be set if `--validation_prompt` is set")
+        raise ValueError(
+            "`--validation_image` must be set if `--validation_prompt` is set"
+        )
 
     if args.validation_prompt is None and args.validation_image is not None:
-        raise ValueError("`--validation_prompt` must be set if `--validation_image` is set")
+        raise ValueError(
+            "`--validation_prompt` must be set if `--validation_image` is set"
+        )
 
     if (
-            args.validation_image is not None
-            and args.validation_prompt is not None
-            and len(args.validation_image) != 1
-            and len(args.validation_prompt) != 1
-            and len(args.validation_image) != len(args.validation_prompt)
+        args.validation_image is not None
+        and args.validation_prompt is not None
+        and len(args.validation_image) != 1
+        and len(args.validation_prompt) != 1
+        and len(args.validation_image) != len(args.validation_prompt)
     ):
         raise ValueError(
             "Must provide either 1 `--validation_image`, 1 `--validation_prompt`,"
@@ -623,10 +711,15 @@ def parse_args(input_args=None):
 
 
 def main(args):
-    real_output_dir = args.output_dir + '/' + args.exp_id
+    # import pdb
+
+    # pdb.set_trace()
+    real_output_dir = args.output_dir + "/" + args.exp_id
     logging_dir = Path(real_output_dir, args.logging_dir)
 
-    accelerator_project_config = ProjectConfiguration(project_dir=real_output_dir, logging_dir=logging_dir)
+    accelerator_project_config = ProjectConfiguration(
+        project_dir=real_output_dir, logging_dir=logging_dir
+    )
 
     accelerator = Accelerator(
         gradient_accumulation_steps=args.gradient_accumulation_steps,
@@ -660,7 +753,9 @@ def main(args):
 
     # Load the tokenizer
     if args.tokenizer_name:
-        tokenizer = AutoTokenizer.from_pretrained(args.tokenizer_name, revision=args.revision, use_fast=False)
+        tokenizer = AutoTokenizer.from_pretrained(
+            args.tokenizer_name, revision=args.revision, use_fast=False
+        )
     elif args.pretrained_model_name_or_path:
         tokenizer = AutoTokenizer.from_pretrained(
             args.pretrained_model_name_or_path,
@@ -673,20 +768,29 @@ def main(args):
         max_length=tokenizer.model_max_length,
         padding="max_length",
         truncation=True,
-        return_tensors="pt"
+        return_tensors="pt",
     ).input_ids
 
     # import correct text encoder class
-    text_encoder_cls = import_model_class_from_model_name_or_path(args.pretrained_model_name_or_path, args.revision)
+    text_encoder_cls = import_model_class_from_model_name_or_path(
+        args.pretrained_model_name_or_path, args.revision
+    )
 
     # Load scheduler and models
-    noise_scheduler = DDPMScheduler.from_pretrained(args.pretrained_model_name_or_path, subfolder="scheduler",
-                                                    beta_schedule='linear' if args.linear_noise_scheduling else 'scaled_linear',
-                                                    revision=args.revision)
-    text_encoder = text_encoder_cls.from_pretrained(
-        args.pretrained_model_name_or_path, subfolder="text_encoder", revision=args.revision
+    noise_scheduler = DDPMScheduler.from_pretrained(
+        args.pretrained_model_name_or_path,
+        subfolder="scheduler",
+        beta_schedule="linear" if args.linear_noise_scheduling else "scaled_linear",
+        revision=args.revision,
     )
-    vae = AutoencoderKL.from_pretrained(args.pretrained_model_name_or_path, subfolder="vae", revision=args.revision)
+    text_encoder = text_encoder_cls.from_pretrained(
+        args.pretrained_model_name_or_path,
+        subfolder="text_encoder",
+        revision=args.revision,
+    )
+    vae = AutoencoderKL.from_pretrained(
+        args.pretrained_model_name_or_path, subfolder="vae", revision=args.revision
+    )
     unet = UNet2DConditionModel.from_pretrained(
         args.pretrained_model_name_or_path, subfolder="unet", revision=args.revision
     )
@@ -731,7 +835,9 @@ def main(args):
                 model = models.pop()
 
                 # load diffusers style into model
-                load_model = NeuralTextureControlNetModel.from_pretrained(input_dir, subfolder="controlnet")
+                load_model = NeuralTextureControlNetModel.from_pretrained(
+                    input_dir, subfolder="controlnet"
+                )
                 model.register_to_config(**load_model.config)
 
                 model.load_state_dict(load_model.state_dict())
@@ -757,7 +863,9 @@ def main(args):
             unet.enable_xformers_memory_efficient_attention()
             controlnet.enable_xformers_memory_efficient_attention()
         else:
-            raise ValueError("xformers is not available. Make sure it is installed correctly")
+            raise ValueError(
+                "xformers is not available. Make sure it is installed correctly"
+            )
 
     if args.gradient_checkpointing:
         controlnet.enable_gradient_checkpointing()
@@ -780,7 +888,10 @@ def main(args):
 
     if args.scale_lr:
         args.learning_rate = (
-                args.learning_rate * args.gradient_accumulation_steps * args.train_batch_size * accelerator.num_processes
+            args.learning_rate
+            * args.gradient_accumulation_steps
+            * args.train_batch_size
+            * accelerator.num_processes
         )
 
     # Use 8-bit Adam for lower memory usage or to fine-tune the model in 16GB GPUs
@@ -806,46 +917,50 @@ def main(args):
         eps=args.adam_epsilon,
     )
 
-    train_datasets = [RelightingDataset(
-        args.dataset_name,
-        args.pretrained_model_name_or_path,
-        channel_aug_ratio=args.proportion_channel_aug,
-        pred_normal_ratio=args.proportion_pred_normal,
-        empty_prompt_ratio=args.proportion_empty_prompts,
-        log_encode_hint=args.log_encode_hint,
-        load_mask=args.add_mask,
-    )]
+    train_datasets = [
+        RelightingDataset(
+            args.dataset_name,
+            args.pretrained_model_name_or_path,
+            channel_aug_ratio=args.proportion_channel_aug,
+            pred_normal_ratio=args.proportion_pred_normal,
+            empty_prompt_ratio=args.proportion_empty_prompts,
+            log_encode_hint=args.log_encode_hint,
+            load_mask=args.add_mask,
+        )
+    ]
     if args.aug_dataset_name is not None:
         train_aug_dataset = RelightingDataset(
             args.aug_dataset_name,
             args.pretrained_model_name_or_path,
-            channel_aug_ratio=0.,
-            pred_normal_ratio=0.,
-            empty_prompt_ratio=0.,
+            channel_aug_ratio=0.0,
+            pred_normal_ratio=0.0,
+            empty_prompt_ratio=0.0,
             log_encode_hint=args.log_encode_hint,
             load_mask=args.add_mask,
             use_black_image_filter=True,
         )
         train_datasets.append(train_aug_dataset)
     train_dataset = ConcatDataset(train_datasets)
-    val_datasets = [RelightingDataset(
-        args.dataset_name,
-        args.pretrained_model_name_or_path,
-        channel_aug_ratio=0.5 if args.proportion_channel_aug > 0 else 0.,
-        pred_normal_ratio=1.0 if args.proportion_pred_normal > 0 else 0.,
-        empty_prompt_ratio=args.proportion_empty_prompts,
-        self_ref_ratio=0.,
-        log_encode_hint=args.log_encode_hint,
-        load_mask=args.add_mask,
-    )]
+    val_datasets = [
+        RelightingDataset(
+            args.dataset_name,
+            args.pretrained_model_name_or_path,
+            channel_aug_ratio=0.5 if args.proportion_channel_aug > 0 else 0.0,
+            pred_normal_ratio=1.0 if args.proportion_pred_normal > 0 else 0.0,
+            empty_prompt_ratio=args.proportion_empty_prompts,
+            self_ref_ratio=0.0,
+            log_encode_hint=args.log_encode_hint,
+            load_mask=args.add_mask,
+        )
+    ]
     if args.aug_dataset_name is not None:
         val_aug_dataset = RelightingDataset(
             args.aug_dataset_name,
             args.pretrained_model_name_or_path,
-            channel_aug_ratio=0.,
-            pred_normal_ratio=0.,
-            empty_prompt_ratio=0.,
-            self_ref_ratio=0.,
+            channel_aug_ratio=0.0,
+            pred_normal_ratio=0.0,
+            empty_prompt_ratio=0.0,
+            self_ref_ratio=0.0,
             log_encode_hint=args.log_encode_hint,
             load_mask=args.add_mask,
             use_black_image_filter=True,
@@ -855,12 +970,12 @@ def main(args):
     test_dataset = RelightingDataset(
         args.test_dataset_name,
         args.pretrained_model_name_or_path,
-        channel_aug_ratio=0.,
-        pred_normal_ratio=0.,
+        channel_aug_ratio=0.0,
+        pred_normal_ratio=0.0,
         empty_prompt_ratio=args.proportion_empty_prompts,
         log_encode_hint=args.log_encode_hint,
         load_mask=args.add_mask,
-        self_ref_ratio=0.,
+        self_ref_ratio=0.0,
     )
 
     train_dataloader = torch.utils.data.DataLoader(
@@ -872,7 +987,9 @@ def main(args):
 
     # Scheduler and math around the number of training steps.
     overrode_max_train_steps = False
-    num_update_steps_per_epoch = math.ceil(len(train_dataloader) / args.gradient_accumulation_steps)
+    num_update_steps_per_epoch = math.ceil(
+        len(train_dataloader) / args.gradient_accumulation_steps
+    )
     if args.max_train_steps is None:
         args.max_train_steps = args.num_train_epochs * num_update_steps_per_epoch
         overrode_max_train_steps = True
@@ -905,7 +1022,9 @@ def main(args):
     text_encoder.to(accelerator.device, dtype=weight_dtype)
 
     # We need to recalculate our total training steps as the size of the training dataloader may have changed.
-    num_update_steps_per_epoch = math.ceil(len(train_dataloader) / args.gradient_accumulation_steps)
+    num_update_steps_per_epoch = math.ceil(
+        len(train_dataloader) / args.gradient_accumulation_steps
+    )
     if overrode_max_train_steps:
         args.max_train_steps = args.num_train_epochs * num_update_steps_per_epoch
     # Afterwards we recalculate our number of training epochs
@@ -921,23 +1040,27 @@ def main(args):
         tracker_config.pop("validation_image")
 
         init_kwargs = {
-            'wandb': {
-                'name': args.exp_id,
-                'resume': 'allow',
-                'id': args.exp_id
-            }
+            "wandb": {"name": args.exp_id, "resume": "allow", "id": args.exp_id}
         }
-        accelerator.init_trackers(args.tracker_project_name, config=tracker_config, init_kwargs=init_kwargs)
+        accelerator.init_trackers(
+            args.tracker_project_name, config=tracker_config, init_kwargs=init_kwargs
+        )
 
     # Train!
-    total_batch_size = args.train_batch_size * accelerator.num_processes * args.gradient_accumulation_steps
+    total_batch_size = (
+        args.train_batch_size
+        * accelerator.num_processes
+        * args.gradient_accumulation_steps
+    )
 
     logger.info("***** Running training *****")
     logger.info(f"  Num examples = {len(train_dataset)}")
     logger.info(f"  Num batches each epoch = {len(train_dataloader)}")
     logger.info(f"  Num Epochs = {args.num_train_epochs}")
     logger.info(f"  Instantaneous batch size per device = {args.train_batch_size}")
-    logger.info(f"  Total train batch size (w. parallel, distributed & accumulation) = {total_batch_size}")
+    logger.info(
+        f"  Total train batch size (w. parallel, distributed & accumulation) = {total_batch_size}"
+    )
     logger.info(f"  Gradient Accumulation steps = {args.gradient_accumulation_steps}")
     logger.info(f"  Total optimization steps = {args.max_train_steps}")
     global_step = 0
@@ -983,14 +1106,21 @@ def main(args):
         for step, batch in enumerate(train_dataloader):
             with accelerator.accumulate(controlnet):
                 # Convert images to latent space
-                latents = vae.encode(batch["pixel_values"].to(dtype=weight_dtype)).latent_dist.sample()
+                latents = vae.encode(
+                    batch["pixel_values"].to(dtype=weight_dtype)
+                ).latent_dist.sample()
                 latents = latents * vae.config.scaling_factor
 
                 # Sample noise that we'll add to the latents
                 noise = torch.randn_like(latents)
                 bsz = latents.shape[0]
                 # Sample a random timestep for each image
-                timesteps = torch.randint(0, noise_scheduler.config.num_train_timesteps, (bsz,), device=latents.device)
+                timesteps = torch.randint(
+                    0,
+                    noise_scheduler.config.num_train_timesteps,
+                    (bsz,),
+                    device=latents.device,
+                )
                 timesteps = timesteps.long()
 
                 # Add noise to the latents according to the noise magnitude at each timestep
@@ -1001,8 +1131,11 @@ def main(args):
                 input_ids = batch["input_ids"]
                 encoder_hidden_states = text_encoder(input_ids)[0]
 
-                controlnet_image = batch["conditioning_pixel_values"].to(dtype=weight_dtype)
-
+                controlnet_image = batch["conditioning_pixel_values"].to(
+                    dtype=weight_dtype
+                )
+                print("controlnet_image_shape", controlnet_image.shape)
+                print("encoder_hidden_states_shape", encoder_hidden_states.shape)
                 down_block_res_samples, mid_block_res_sample = controlnet(
                     noisy_latents,
                     timesteps,
@@ -1017,9 +1150,12 @@ def main(args):
                     timesteps,
                     encoder_hidden_states=encoder_hidden_states,
                     down_block_additional_residuals=[
-                        sample.to(dtype=weight_dtype) for sample in down_block_res_samples
+                        sample.to(dtype=weight_dtype)
+                        for sample in down_block_res_samples
                     ],
-                    mid_block_additional_residual=mid_block_res_sample.to(dtype=weight_dtype),
+                    mid_block_additional_residual=mid_block_res_sample.to(
+                        dtype=weight_dtype
+                    ),
                 ).sample
 
                 # Get the target for loss depending on the prediction type
@@ -1028,7 +1164,9 @@ def main(args):
                 elif noise_scheduler.config.prediction_type == "v_prediction":
                     target = noise_scheduler.get_velocity(latents, noise, timesteps)
                 else:
-                    raise ValueError(f"Unknown prediction type {noise_scheduler.config.prediction_type}")
+                    raise ValueError(
+                        f"Unknown prediction type {noise_scheduler.config.prediction_type}"
+                    )
                 if args.add_mask and args.mask_weight > 0:
                     mask = controlnet_image[:, :1].to(dtype=weight_dtype)
                     mask = F.interpolate(
@@ -1036,10 +1174,15 @@ def main(args):
                         size=model_pred.shape[-2:],
                         mode="bilinear",
                         align_corners=False,
-                        antialias=True
+                        antialias=True,
                     )  # [BS, 1, 64, 64]
-                    model_pred = model_pred * mask + (1. - mask) * (1. - args.mask_weight) * model_pred
-                    target = target * mask + (1. - mask) * (1. - args.mask_weight) * target
+                    model_pred = (
+                        model_pred * mask
+                        + (1.0 - mask) * (1.0 - args.mask_weight) * model_pred
+                    )
+                    target = (
+                        target * mask + (1.0 - mask) * (1.0 - args.mask_weight) * target
+                    )
                 loss = F.mse_loss(model_pred.float(), target.float(), reduction="mean")
 
                 accelerator.backward(loss)
@@ -1060,24 +1203,36 @@ def main(args):
                         # _before_ saving state, check if this save would set us over the `checkpoints_total_limit`
                         if args.checkpoints_total_limit is not None:
                             checkpoints = os.listdir(real_output_dir)
-                            checkpoints = [d for d in checkpoints if d.startswith("checkpoint")]
-                            checkpoints = sorted(checkpoints, key=lambda x: int(x.split("-")[1]))
+                            checkpoints = [
+                                d for d in checkpoints if d.startswith("checkpoint")
+                            ]
+                            checkpoints = sorted(
+                                checkpoints, key=lambda x: int(x.split("-")[1])
+                            )
 
                             # before we save the new checkpoint, we need to have at _most_ `checkpoints_total_limit - 1` checkpoints
                             if len(checkpoints) >= args.checkpoints_total_limit:
-                                num_to_remove = len(checkpoints) - args.checkpoints_total_limit + 1
+                                num_to_remove = (
+                                    len(checkpoints) - args.checkpoints_total_limit + 1
+                                )
                                 removing_checkpoints = checkpoints[0:num_to_remove]
 
                                 logger.info(
                                     f"{len(checkpoints)} checkpoints already exist, removing {len(removing_checkpoints)} checkpoints"
                                 )
-                                logger.info(f"removing checkpoints: {', '.join(removing_checkpoints)}")
+                                logger.info(
+                                    f"removing checkpoints: {', '.join(removing_checkpoints)}"
+                                )
 
                                 for removing_checkpoint in removing_checkpoints:
-                                    removing_checkpoint = os.path.join(real_output_dir, removing_checkpoint)
+                                    removing_checkpoint = os.path.join(
+                                        real_output_dir, removing_checkpoint
+                                    )
                                     shutil.rmtree(removing_checkpoint)
 
-                        save_path = os.path.join(real_output_dir, f"checkpoint-{global_step}")
+                        save_path = os.path.join(
+                            real_output_dir, f"checkpoint-{global_step}"
+                        )
                         accelerator.save_state(save_path)
                         logger.info(f"Saved state to {save_path}")
 
@@ -1094,7 +1249,7 @@ def main(args):
                             weight_dtype,
                             global_step,
                             val_dataset,
-                            test_dataset
+                            test_dataset,
                         )
 
             logs = {"loss": loss.detach().item(), "lr": lr_scheduler.get_last_lr()[0]}
