@@ -178,6 +178,23 @@ def elem_generate_hint(args: dict):
         f"Rendering radiance hints for {image_path} with viewpoint {viewpoint_id} and lighting condition {lighting_condition_id}"
     )
     # Mesh reconstruction and fov estimation for hints rendering
+    
+    render_target = [
+        os.path.join(output_folder, f"hint00_diffuse.png"),
+        os.path.join(output_folder, f"hint00_ggx0.05.png"),
+        os.path.join(output_folder, f"hint00_ggx0.13.png"),
+        os.path.join(output_folder, f"hint00_ggx0.34.png"),
+    ]
+    sentinel = False
+    for each_render_target in render_target:
+        if os.path.exists(each_render_target):
+            sentinel = True
+        else:
+            sentinel = False
+    if sentinel:
+        print(f"Radiance hints already rendered to {output_folder}")
+        return
+    
     fov = args.fov
     mesh, fov = mesh_reconstruction(image, mask, False, fov, args.mask_threshold)
     # TODO make mesh from colmap maybe better?
@@ -188,7 +205,7 @@ def elem_generate_hint(args: dict):
         env_map=args.env_map,
         pls=args.pls,
         output_folder=output_folder,
-        resolution=args.resolution
+        resolution=args.resolution,
         use_gpu=args.use_gpu_for_rendering,
     )
     print(f"Radiance hints rendered to {output_folder}")
