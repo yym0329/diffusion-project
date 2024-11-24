@@ -86,7 +86,7 @@ class NeuralTextureEmbedding(nn.Module):
     def __init__(
         self,
         conditioning_embedding_channels: int,
-        conditioning_channels: int = 3,  # process referential image
+        conditioning_channels: int = 3,  # process referential image. If use mask, then 4
         block_out_channels: Tuple[int] = (16, 32, 96, 256),
         shading_hint_channels: int = 12,  # diffuse + 3 * ggx
     ):
@@ -142,7 +142,7 @@ class NeuralTextureEmbedding(nn.Module):
         import cv2
 
         # c,h,w -> h,w,c
-        cond_img_to_save = conditioning[0].detach().cpu().numpy().transpose(1, 2, 0)
+        cond_img_to_save = conditioning[0, :3].detach().cpu().numpy().transpose(1, 2, 0)
         shading_hint1 = shading_hint[0, 3:6].detach().cpu().numpy().transpose(1, 2, 0)
         shading_hint2 = shading_hint[0, 6:9].detach().cpu().numpy().transpose(1, 2, 0)
         shading_hint3 = shading_hint[0, 9:].detach().cpu().numpy().transpose(1, 2, 0)
@@ -150,27 +150,27 @@ class NeuralTextureEmbedding(nn.Module):
             # [0,1] to [0, 255]
             cond_img_to_save = (cond_img_to_save * 255).astype("uint8")
             # bgr to rgb
-            cond_img_to_save = cv2.cvtColor(cond_img_to_save, cv2.COLOR_GRB2BGR)
+            cond_img_to_save = cv2.cvtColor(cond_img_to_save, cv2.COLOR_RGB2BGR)
             cv2.imwrite("conditioning.png", cond_img_to_save)
         except Exception as e:
             print(e)
         try:
             shading_hint1 = (shading_hint1 * 255).astype("uint8")
             # bgr to rgb
-            shading_hint1 = cv2.cvtColor(shading_hint1, cv2.COLOR_GRB2BGR)
+            shading_hint1 = cv2.cvtColor(shading_hint1, cv2.COLOR_RGB2BGR)
             cv2.imwrite("hint1.png", shading_hint1)
         except Exception as e:
             print(e)
         try:
             shading_hint2 = (shading_hint2 * 255).astype("uint8")
-            shading_hint2 = cv2.cvtColor(shading_hint2, cv2.COLOR_GRB2BGR)
+            shading_hint2 = cv2.cvtColor(shading_hint2, cv2.COLOR_RGB2BGR)
             cv2.imwrite("hint2.png", shading_hint2)
         except Exception as e:
             print(e)
 
         try:
             shading_hint3 = (shading_hint3 * 255).astype("uint8")
-            shading_hint3 = cv2.cvtColor(shading_hint3, cv2.COLOR_GRB2BGR)
+            shading_hint3 = cv2.cvtColor(shading_hint3, cv2.COLOR_RGB2BGR)
             cv2.imwrite("hint3.png", shading_hint3)
         except Exception as e:
             print(e)

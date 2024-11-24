@@ -19,12 +19,9 @@ class DataSetDefinition:
         resolution = 512
     else:
         resolution = 128
-
+        
+    processed_data_root_dir: str = "./data/processed"
     raw_data_root_dir: str = field(default="./data/lighting_patterns")
-    if processed_dir_suffix is None:
-        processed_data_root_dir: str = field(default="./data/processed")
-    else:
-        processed_data_root_dir: str = field(default=os.path.join("./data/processed", processed_dir_suffix))
     split: List[str] = field(default_factory=lambda: ["train", "eval"])
 
     # object classes, available view points
@@ -86,7 +83,7 @@ class DataSetDefinition:
     eval_split: List[str] = field(default_factory=lambda: [])
 
     def __post_init__(self):
-
+        
         with open(self.data_definition_json_path, "r") as f:
             self.raw_data_definition = json.load(f)
 
@@ -231,11 +228,17 @@ class DataSetDefinition:
         
         for each_split in self.split:
             for each_class in self.class_name_list:
+                
+                step1_root_dir = step2_root_dir = self.processed_data_root_dir
+                
+                if self.processed_dir_suffix is not None:
+                    step2_root_dir = os.path.join(step2_root_dir, self.processed_dir_suffix)
+                
                 if resolution_4x:
-                    root_dir = os.path.join(self.processed_data_root_dir, "4x")
-                else:
-                    root_dir = self.processed_data_root_dir
-                class_dir = os.path.join(root_dir, each_split, "images", each_class)
+                    step1_root_dir = os.path.join(step1_root_dir, "4x")
+                    step2_root_dir = os.path.join(step2_root_dir, "4x")
+
+                class_dir = os.path.join(step1_root_dir, each_split, "images", each_class)
                 path_list = os.listdir(class_dir)
                 for each_image_path in path_list:
                     base_name = os.path.basename(each_image_path)
@@ -246,7 +249,7 @@ class DataSetDefinition:
                     image_id = base_name.split("_")[0] + "_" + base_name.split("_")[1] + "_" + base_name.split("_")[2]
                     
                     mask_path = os.path.join(
-                        root_dir, each_split, "masks", each_class, 
+                        step1_root_dir, each_split, "masks", each_class, 
                         f"{each_class}_{view_point}.png"
                     )
                     datadict_list[each_split].append(
@@ -256,7 +259,7 @@ class DataSetDefinition:
                             "viewpoint_id": view_point,
                             "lighting_condition_id": light_condition,
                             "image_id": image_id,
-                            "output_dir": os.path.join(root_dir, each_split, "hints"),
+                            "output_dir": os.path.join(step2_root_dir, each_split, "hints"),
                             "fov": None,
                             "mask_threshold": 0.25,
                             "env_map": self.light_condition_path_list[light_condition],

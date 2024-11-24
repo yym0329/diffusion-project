@@ -78,6 +78,7 @@ def image_grid(imgs, rows, cols):
 
 
 def log_validation(
+    validation_dataset,
     vae,
     text_encoder,
     tokenizer,
@@ -122,62 +123,87 @@ def log_validation(
     else:
         generator = torch.Generator(device=accelerator.device).manual_seed(args.seed)
 
-    if len(args.validation_image) == len(args.validation_prompt):
-        validation_images = args.validation_image
-        validation_prompts = args.validation_prompt
-    elif len(args.validation_image) == 1:
-        validation_images = args.validation_image * len(args.validation_prompt)
-        validation_prompts = args.validation_prompt
-    elif len(args.validation_prompt) == 1:
-        validation_images = args.validation_image
-        validation_prompts = args.validation_prompt * len(args.validation_image)
-    else:
-        raise ValueError(
-            "number of `args.validation_image` and `args.validation_prompt` should be checked in `parse_args`"
-        )
+    # if len(args.validation_image) == len(args.validation_prompt):
+    #     validation_images = args.validation_image
+    #     validation_prompts = args.validation_prompt
+    # elif len(args.validation_image) == 1:
+    #     validation_images = args.validation_image * len(args.validation_prompt)
+    #     validation_prompts = args.validation_prompt
+    # elif len(args.validation_prompt) == 1:
+    #     validation_images = args.validation_image
+    #     validation_prompts = args.validation_prompt * len(args.validation_image)
+    # else:
+    #     raise ValueError(
+    #         "number of `args.validation_image` and `args.validation_prompt` should be checked in `parse_args`"
+    #     )
 
     image_logs = []
     inference_ctx = (
         contextlib.nullcontext() if is_final_validation else torch.autocast("cuda")
     )
 
-    for validation_prompt, validation_image in zip(
-        validation_prompts, validation_images
-    ):
-        validation_image = Image.open(validation_image).convert("RGB")
+    for idx in range(8):
+        i = random.randint(0, len(validation_dataset))
+        batch = validation_dataset[i]
+        prompt = batch["text"]
+        validation_image = torch.from_numpy(batch["conditioning_pixel_values"]).to(
+            accelerator.device
+        )[None]
 
         images = []
 
         for _ in range(args.num_validation_images):
-            with inference_ctx:
+            with torch.autocast("cuda"):
                 image = pipeline(
-                    validation_prompt,
+                    prompt,
                     validation_image,
-                    num_inference_steps=20,
+                    num_inference_steps=30,
                     generator=generator,
                 ).images[0]
 
             images.append(image)
 
+        cond_pixels = batch[
+            "conditioning_pixel_values"
+        ]  # hints. [mask, ref image , diffuse, 3*ggx]
+
+        logger.info(f"images shape: {cond_pixels.shape}")
+        if args.add_mask:
+            cond_pixels = cond_pixels[1:]  # skip mask
         image_logs.append(
             {
-                "validation_image": validation_image,
+                "ref_textured_image": cond_pixels[:3, :, :]
+                .transpose(1, 2, 0)
+                .clip(0, 1),
+                "diffuse_hint_image": cond_pixels[3:6, :, :]
+                .transpose(1, 2, 0)
+                .clip(0, 1),
+                "ggx034_hint_image": cond_pixels[-3:, :, :]
+                .transpose(1, 2, 0)
+                .clip(0, 1),
+                "target_image": (batch["pixel_values"] / 2.0 + 0.5).transpose(1, 2, 0),
                 "images": images,
-                "validation_prompt": validation_prompt,
+                "validation_prompt": prompt,
+                "target_filepath": batch["target_file"],
+                "ref_filepath": batch["ref_file"],
+                "model_id": batch["model_id"],
             }
         )
-
-    tracker_key = "test" if is_final_validation else "validation"
     for tracker in accelerator.trackers:
         if tracker.name == "tensorboard":
             for log in image_logs:
                 images = log["images"]
                 validation_prompt = log["validation_prompt"]
-                validation_image = log["validation_image"]
+                ref_textured_image = log["ref_textured_image"]
+                diffuse_hint_image = log["diffuse_hint_image"]
+                ggx034_hint_image = log["ggx034_hint_image"]
+                target_image = log["target_image"]
 
                 formatted_images = []
-
-                formatted_images.append(np.asarray(validation_image))
+                formatted_images.append(ref_textured_image)
+                formatted_images.append(diffuse_hint_image)
+                formatted_images.append(ggx034_hint_image)
+                formatted_images.append(target_image)
 
                 for image in images:
                     formatted_images.append(np.asarray(image))
@@ -188,22 +214,45 @@ def log_validation(
                     validation_prompt, formatted_images, step, dataformats="NHWC"
                 )
         elif tracker.name == "wandb":
+            text_table = wandb.Table(
+                columns=["steps", "target_file", "ref_file", "prompt"]
+            )
             formatted_images = []
 
             for log in image_logs:
                 images = log["images"]
                 validation_prompt = log["validation_prompt"]
-                validation_image = log["validation_image"]
+                ref_textured_image = log["ref_textured_image"]
+                diffuse_hint_image = log["diffuse_hint_image"]
+                ggx034_hint_image = log["ggx034_hint_image"]
+                target_image = log["target_image"]
+                model_id = log["model_id"]
+                text_table.add_data(
+                    step, log["target_filepath"], log["ref_filepath"], validation_prompt
+                )
 
                 formatted_images.append(
-                    wandb.Image(validation_image, caption="Controlnet conditioning")
+                    wandb.Image(ref_textured_image, caption="Reference textured image")
+                )
+                formatted_images.append(
+                    wandb.Image(diffuse_hint_image, caption="Diffuse hint image")
+                )
+                formatted_images.append(
+                    wandb.Image(ggx034_hint_image, caption="GGX 0.34 hint image")
+                )
+                formatted_images.append(
+                    wandb.Image(target_image, caption="Target image")
                 )
 
                 for image in images:
-                    image = wandb.Image(image, caption=validation_prompt)
+                    logger.info(f"image shape: {image.shape}")
+                    image = wandb.Image(
+                        image, caption=(model_id + " " + validation_prompt)
+                    )
                     formatted_images.append(image)
 
-            tracker.log({tracker_key: formatted_images})
+            tracker.log({"validation": formatted_images})
+            tracker.log({"validation_path": text_table})
         else:
             logger.warning(f"image logging not implemented for {tracker.name}")
 
@@ -609,6 +658,12 @@ def parse_args(input_args=None):
         ),
     )
     parser.add_argument(
+        "--validation_dataset_name",
+        type=str,
+        default=None,
+        help="The name of the Dataset (from the HuggingFace hub) to validate on.",
+    )
+    parser.add_argument(
         "--validation_image",
         type=str,
         default=None,
@@ -620,6 +675,7 @@ def parse_args(input_args=None):
             " `--validation_image` that will be used with all `--validation_prompt`s."
         ),
     )
+
     parser.add_argument(
         "--num_validation_images",
         type=int,
@@ -645,7 +701,28 @@ def parse_args(input_args=None):
             " more information see https://huggingface.co/docs/accelerate/v0.17.0/en/package_reference/accelerator#accelerate.Accelerator"
         ),
     )
-
+    parser.add_argument(
+        "--add_mask",
+        action="store_true",
+        help="Add mask to the conditioning images.",
+    )
+    parser.add_argument(
+        "--shading_hint_channels",
+        type=int,
+        default=12,
+        help="Number of shading hint channels. diffuse, 3*ggx, -> 12 is default",
+    )
+    parser.add_argument(
+        "--proportion_channel_aug",
+        type=float,
+        default=0.0,
+        help="Proportion of channel augmentation.",
+    )
+    parser.add_argument(
+        "--log_encode_hint",
+        action="store_true",
+        help="Log the encoded hint.",
+    )
     if input_args is not None:
         args = parser.parse_args(input_args)
     else:
@@ -659,6 +736,9 @@ def parse_args(input_args=None):
 
     if args.proportion_empty_prompts < 0 or args.proportion_empty_prompts > 1:
         raise ValueError("`--proportion_empty_prompts` must be in the range [0, 1].")
+
+    if args.validation_dataset_name is None:
+        raise ValueError("`--validation_dataset_name` is required for validation.")
 
     if args.validation_prompt is not None and args.validation_image is None:
         raise ValueError(
@@ -938,12 +1018,22 @@ def main(args):
         variant=args.variant,
     )
 
+    conditioning_channels = 4 if args.add_mask else 3
     if args.controlnet_model_name_or_path:
         logger.info("Loading existing controlnet weights")
-        controlnet = ControlNetModel.from_pretrained(args.controlnet_model_name_or_path)
+        controlnet = NeuralTextureControlNetModel.from_pretrained(
+            args.controlnet_model_name_or_path,
+            shading_hint_channels=args.shading_hint_channels,
+            conditioning_channels=conditioning_channels,
+        )
     else:
         logger.info("Initializing controlnet weights from unet")
-        controlnet = ControlNetModel.from_unet(unet)
+        controlnet = NeuralTextureControlNetModel.from_unet(
+            unet,
+            shading_hint_channels=args.shading_hint_channels,
+            conditioning_channels=conditioning_channels,
+        )
+        logger.info("Controlnet initialized from unet")
 
     # Taken from [Sayak Paul's Diffusers PR #6511](https://github.com/huggingface/diffusers/pull/6511/files)
     def unwrap_model(model):
@@ -973,7 +1063,7 @@ def main(args):
                 model = models.pop()
 
                 # load diffusers style into model
-                load_model = ControlNetModel.from_pretrained(
+                load_model = NeuralTextureControlNetModel.from_pretrained(
                     input_dir, subfolder="controlnet"
                 )
                 model.register_to_config(**load_model.config)
@@ -1055,11 +1145,38 @@ def main(args):
         eps=args.adam_epsilon,
     )
 
-    train_dataset = make_train_dataset(args, tokenizer, accelerator)
+    from relighting_dataset import RelightingDataset
+
+    train_dataset = RelightingDataset(
+        data_jsonl=args.dataset_name,
+        pretrained_model=args.pretrained_model_name_or_path,
+        channel_aug_ratio=args.proportion_channel_aug,  # add to args
+        empty_prompt_ratio=args.proportion_empty_prompts,  # add to args
+        log_encode_hint=args.log_encode_hint,  # add to args
+        load_mask=args.add_mask,  # add to args
+    )
+    # train_dataset = make_train_dataset(args, tokenizer, accelerator)
 
     train_dataloader = torch.utils.data.DataLoader(
         train_dataset,
         shuffle=True,
+        collate_fn=collate_fn,
+        batch_size=args.train_batch_size,
+        num_workers=args.dataloader_num_workers,
+    )
+
+    validataion_dataset = RelightingDataset(
+        data_jsonl=args.validation_dataset_name,
+        pretrained_model=args.pretrained_model_name_or_path,
+        channel_aug_ratio=args.proportion_channel_aug,  # add to args
+        empty_prompt_ratio=args.proportion_empty_prompts,  # add to args
+        log_encode_hint=args.log_encode_hint,  # add to args
+        load_mask=args.add_mask,  # add to args
+    )
+
+    validation_dataloader = torch.utils.data.DataLoader(
+        validataion_dataset,
+        shuffle=False,
         collate_fn=collate_fn,
         batch_size=args.train_batch_size,
         num_workers=args.dataloader_num_workers,
@@ -1303,6 +1420,7 @@ def main(args):
                         and global_step % args.validation_steps == 0
                     ):
                         image_logs = log_validation(
+                            validation_dataloader,
                             vae,
                             text_encoder,
                             tokenizer,
@@ -1321,7 +1439,7 @@ def main(args):
             if global_step >= args.max_train_steps:
                 break
 
-    # Create the pipeline using using the trained modules and save it.
+    # Create the pipeline using the trained modules and save it.
     accelerator.wait_for_everyone()
     if accelerator.is_main_process:
         controlnet = unwrap_model(controlnet)
@@ -1331,6 +1449,7 @@ def main(args):
         image_logs = None
         if args.validation_prompt is not None:
             image_logs = log_validation(
+                validation_dataloader,
                 vae=vae,
                 text_encoder=text_encoder,
                 tokenizer=tokenizer,
