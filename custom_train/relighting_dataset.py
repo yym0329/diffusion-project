@@ -8,6 +8,7 @@ from tqdm import tqdm
 from torch.utils.data import Dataset, DataLoader
 from transformers import AutoTokenizer
 
+import torch
 
 imageio.plugins.freeimage.download()
 
@@ -137,7 +138,7 @@ class RelightingDataset(Dataset):
                 if mask.max() > 1:
                     mask = mask / 255.0
 
-            else:
+            else:  # no 'mask' column in the item
                 try:
                     depth_path = "/".join(
                         item["image"].split("/")[:-2] + ["depth0001.exr"]
@@ -148,22 +149,23 @@ class RelightingDataset(Dataset):
                 except Exception as e:
                     print(f"Error loading depth: {e}")
                     mask = np.ones_like(source[..., 0])
+
             if self.use_black_image_filter:
                 assert np.mean(mask) > 0.1, f"low fg ratio: {source_filename}"
             if self.load_mask:
                 # print("hint shape", hint.shape)
                 # print("mask shape", mask.shape)
-                try:
+                try:  # mask shape: (H, W, 1) or (H, W)
+                    # hint: shape (H, W, C) rgb
                     if len(mask.shape) == len(hint.shape):
                         hint = np.concatenate([mask.astype(np.float32), hint], axis=2)
                     else:
+                        # mask has 1 less channel
                         hint = np.concatenate(
-                            [mask.astype(np.float32)[..., None], hint], axis=2
+                            [mask[..., None].astype(np.float32), hint], axis=2
                         )
-
-                    # else:
-                    #     raise ValueError("mask shape not supported")
                 except Exception as e:
+                    print("====================================")
                     print("Error concatenating mask: ", e)
                     print("mask shape", mask.shape)
                     print("hint shape", hint.shape)
@@ -173,6 +175,7 @@ class RelightingDataset(Dataset):
             p = random.random()
             if p < self.empty_prompt_ratio:
                 prompt = ""
+
             # tokenize prompt
             inputs = self.tokenizer(
                 prompt,
@@ -187,12 +190,14 @@ class RelightingDataset(Dataset):
             print(idx, repr(e), e)
             return self.__getitem__(np.random.randint(0, len(self.data)))
 
-        # print("pixel_values.shape", target.transpose(2, 0, 1).shape)
-        # print("conditioning pixel_values.shape", hint.transpose(2, 0, 1).shape)
+        # target, hint np.ndarray to torch tensor
+        target = torch.from_numpy(target.transpose(2, 0, 1))  # (H, W, C) -> (C, H, W)
+        hint = torch.from_numpy(hint.transpose(2, 0, 1))  # (H, W, C) -> (C, H, W)
+
         return dict(
-            pixel_values=target.transpose(2, 0, 1),
+            pixel_values=target,
             input_ids=inputs.input_ids[0],
-            conditioning_pixel_values=hint.transpose(2, 0, 1),
+            conditioning_pixel_values=hint,
             text=prompt,
             target_file=target_filename,
             ref_file=source_filename,
