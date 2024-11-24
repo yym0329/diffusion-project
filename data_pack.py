@@ -266,4 +266,25 @@ class DataSetDefinition:
                         }
                     )
         return datadict_list
+    
+    def step3_data_mover(self):
+        """
+        processed
+        -> processed/resolution_1x
+            -> processed/resolution_1x/train
+                -> processed/resolution_1x/train/obj_xx_xxx/
+                    (GT reference image, mask, hint_diffuse, hint_ggx0.05, hint_ggx0.13, hint_ggx0.34)
+            -> processed/resolution_1x/eval
+        -> processed/resolution_4x
+            -> processed/resolution_4x/train
+            -> processed/resolution_4x/eval
+        여기는 학습하게 편하게 dataset을 재구성 해주는 것을 목표로 한다.
         
+        """
+        pass
+
+    def radiance_hint_checker(self):
+        """
+        보아하니 내가 제대로 generation을 못한 게 있는 거 같으니 확인 해주는 function을 만들자
+        Dataset은 한 샘플 당 (GT reference image, mask, hint_diffuse, hint_ggx0.05, hint_ggx0.13, hint_ggx0.34) 이렇게 나오게 해주시면 됩니다
+        """

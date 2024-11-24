@@ -75,7 +75,7 @@ def directory_composer(cli_arg):
 def radiance_compute(cli_arg):
     ray.init()
 
-    wrapped_elem_generate_hint = ray.remote(num_gpus=cli_arg.num_gpus)(
+    wrapped_elem_generate_hint = ray.remote(num_gpus=cli_arg.num_gpus, num_cpus=1)(
         elem_generate_hint
     )
 
