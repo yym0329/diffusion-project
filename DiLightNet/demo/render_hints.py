@@ -31,56 +31,58 @@ def render_hint_images(
     from bpy_helper.utils import stdout_redirected
     
     
-    def configure_blender():
-        # Set the render resolution
-        bpy.context.scene.render.resolution_x = resolution
-        bpy.context.scene.render.resolution_y = resolution
-        bpy.context.scene.render.engine = 'CYCLES'
-        bpy.context.scene.cycles.samples = 512
-        if use_gpu:
-            bpy.context.preferences.addons["cycles"].preferences.get_devices()
-            bpy.context.scene.cycles.device = 'GPU'
-            bpy.context.preferences.addons['cycles'].preferences.compute_device_type = 'CUDA'
-            bpy.context.scene.render.threads = 8
-            bpy.context.scene.render.threads_mode = 'FIXED'
-
-        # Enable the alpha channel for GT mask
-        bpy.context.scene.render.film_transparent = True
-        bpy.context.scene.render.image_settings.color_mode = 'RGBA'
-
     # def configure_blender():
     #     # Set the render resolution
     #     bpy.context.scene.render.resolution_x = resolution
     #     bpy.context.scene.render.resolution_y = resolution
-    #     bpy.context.scene.render.engine = "CYCLES"
+    #     bpy.context.scene.render.engine = 'CYCLES'
     #     bpy.context.scene.cycles.samples = 512
-
-    #     # import ipdb; ipdb.set_trace()
-
     #     if use_gpu:
     #         bpy.context.preferences.addons["cycles"].preferences.get_devices()
     #         bpy.context.scene.cycles.device = 'GPU'
     #         bpy.context.preferences.addons['cycles'].preferences.compute_device_type = 'CUDA'
     #         bpy.context.scene.render.threads = 8
     #         bpy.context.scene.render.threads_mode = 'FIXED'
-    #         bpy.context.scene.cycles.use_cpu = False  # nerver use CPU
-    #         # bpy.context.preferences.addons["cycles"].preferences.compute_device_type = ("CUDA")
-    #         # bpy.context.scene.cycles.device = "GPU"
-    #         # bpy.context.preferences.addons["cycles"].preferences.get_devices()
-            
-    #         # import ipdb ; ipdb.set_trace()
-    #         # for d in bpy.context.preferences.addons["cycles"].preferences.devices:
-    #         #     if d.type == "CUDA":
-    #         #         d.use = False
-    #         #         break
-    #         #     else:
-    #         #         d.use = False
-                
-    #         # bpy.context.preferences.addons["cycles"].preferences.devices[-1].use = True
 
     #     # Enable the alpha channel for GT mask
     #     bpy.context.scene.render.film_transparent = True
-    #     bpy.context.scene.render.image_settings.color_mode = "RGBA"
+    #     bpy.context.scene.render.image_settings.color_mode = 'RGBA'
+
+    def configure_blender():
+        # Set the render resolution
+        bpy.context.scene.render.resolution_x = resolution
+        bpy.context.scene.render.resolution_y = resolution
+        bpy.context.scene.render.engine = "CYCLES"
+        bpy.context.scene.cycles.samples = 512
+
+        # import ipdb; ipdb.set_trace()
+
+        if use_gpu:
+            # Set the compute device type to 'OPTIX'
+            preferences = bpy.context.preferences.addons['cycles'].preferences
+            preferences.compute_device_type = 'CUDA'
+
+            # Refresh the list of devices
+            preferences.get_devices()
+
+            # Set the device for the scene
+            bpy.context.scene.cycles.device = 'GPU'
+
+            # import ipdb; ipdb.set_trace()
+            # Enable the GPU device
+            for device in preferences.devices:
+                if device.type == 'CUDA':
+                    device.use = False
+                elif device.type == "CPU":
+                    device.use = False
+                else:
+                    device.use = True
+                
+            # bpy.context.preferences.addons["cycles"].preferences.devices[-1].use = True
+
+        # Enable the alpha channel for GT mask
+        bpy.context.scene.render.film_transparent = True
+        bpy.context.scene.render.image_settings.color_mode = "RGBA"
 
     def render_rgb_and_hint(output_path):
         MAT_DICT = {

@@ -14,11 +14,11 @@ class DataSetDefinition:
     """
     
     processed_dir_suffix: Optional[str] = None 
-    resolution_4x: bool = False
-    if resolution_4x:
-        resolution = 512
-    else:
-        resolution = 128
+    # resolution_4x: bool = False
+    # if resolution_4x:
+    #     resolution = 512
+    # else:
+    #     resolution = 128
         
     processed_data_root_dir: str = "./data/processed"
     raw_data_root_dir: str = field(default="./data/lighting_patterns")
@@ -237,7 +237,10 @@ class DataSetDefinition:
                 if resolution_4x:
                     step1_root_dir = os.path.join(step1_root_dir, "4x")
                     step2_root_dir = os.path.join(step2_root_dir, "4x")
-
+                    resolution = 512
+                else: 
+                    resolution = 128
+                
                 class_dir = os.path.join(step1_root_dir, each_split, "images", each_class)
                 path_list = os.listdir(class_dir)
                 for each_image_path in path_list:
@@ -265,7 +268,7 @@ class DataSetDefinition:
                             "env_map": self.light_condition_path_list[light_condition],
                             "pls": [[0,0,0]],
                             "use_gpu_for_rendering": True,
-                            "resolution": self.resolution
+                            "resolution": resolution
                         }
                     )
         return datadict_list

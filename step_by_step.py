@@ -75,14 +75,13 @@ def directory_composer(cli_arg):
 def radiance_compute(cli_arg):
     ray.init()
 
-    wrapped_elem_generate_hint = ray.remote(num_gpus=cli_arg.num_gpus, num_cpus=1)(
+    wrapped_elem_generate_hint = ray.remote(num_gpus=cli_arg.num_gpus, num_cpus=2)(
         elem_generate_hint
     )
 
     print("Generating dataset skeleton")
     dataset_def = DataSetDefinition(
         processed_dir_suffix=cli_arg.processed_dir_suffix,
-        resolution_4x=cli_arg.resolution_4x,
     )
 
     step2_dict = dataset_def.step2_dict_generator(resolution_4x=cli_arg.resolution_4x)
