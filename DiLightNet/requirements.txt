@@ -14,5 +14,5 @@ gradio
 simple_parsing
 einops
 imageio[ffmpeg]
-# git+https://github.com/naver/croco/#subdirectory=models/curope
+git+https://github.com/naver/croco/#subdirectory=models/curope
 git+https://github.com/iamNCJ/dust3r.git

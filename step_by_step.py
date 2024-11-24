@@ -79,6 +79,7 @@ def radiance_compute(cli_arg):
         elem_generate_hint
     )
 
+    print("Generating dataset skeleton")
     dataset_def = DataSetDefinition(
         processed_dir_suffix=cli_arg.processed_dir_suffix,
         resolution_4x=cli_arg.resolution_4x,
@@ -88,6 +89,7 @@ def radiance_compute(cli_arg):
 
     ray_pack = []
 
+    print("generating radiance hint")
     for key, val in step2_dict.items():
         print(f"Processing {key} data")
         for each_elem in tqdm(val):
@@ -95,6 +97,7 @@ def radiance_compute(cli_arg):
 
     result = ray.get(ray_pack)
 
+    print("processing done")
 
 if __name__ == "__main__":
     cli_arg = argparse.ArgumentParser()

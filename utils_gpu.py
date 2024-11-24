@@ -188,9 +188,12 @@ def elem_generate_hint(args: dict):
     sentinel = False
     for each_render_target in render_target:
         if os.path.exists(each_render_target):
-            sentinel = True
+            print(f"Radiance hints already rendered to {each_render_target}")
+            sentinel *= True
         else:
-            sentinel = False
+            print(f"Radiance hints not rendered to {each_render_target}")
+            sentinel *= False
+            
     if sentinel:
         print(f"Radiance hints already rendered to {output_folder}")
         return
