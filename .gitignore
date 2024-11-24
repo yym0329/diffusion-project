@@ -2,7 +2,9 @@ data/
 data_processed/
 tmp/
 radiance_hints/
-
+dataset/
+wandb/
+runs/
 # cache
 .pyc
 

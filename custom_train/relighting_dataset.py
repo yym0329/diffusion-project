@@ -8,6 +8,7 @@ from tqdm import tqdm
 from torch.utils.data import Dataset, DataLoader
 from transformers import AutoTokenizer
 
+import torch
 
 imageio.plugins.freeimage.download()
 
@@ -65,7 +66,11 @@ class RelightingDataset(Dataset):
             if not self.eval_mode and random.random() < self.self_ref_ratio:
                 source_filename = target_filename
             shading_filenames = item["hint"]
-            prompt = item["text"]
+            if "text" in item:
+                prompt = item["text"]
+            else:
+                prompt = ""
+                print("No prompt in data")
 
             source = cv2.imread(source_filename)
             source = cv2.cvtColor(source, cv2.COLOR_BGR2RGB)
@@ -75,6 +80,7 @@ class RelightingDataset(Dataset):
             target = cv2.cvtColor(target, cv2.COLOR_BGR2RGB)
             target = target / 127.5 - 1.0  # Normalize target images to [-1, 1].
 
+            # Shade image importing
             shadings = []
             # use_pred_normal = random.random() < self.pred_normal_ratio
             use_pred_normal = False
@@ -90,9 +96,11 @@ class RelightingDataset(Dataset):
                 else:
                     shading = cv2.imread(shading_filename)
                     shading = cv2.cvtColor(shading, cv2.COLOR_BGR2RGB)
-                    shading = shading / 255.0  # Scale shading images to [0, 1].
+                    if shading.max() > 1:
+                        shading = shading / 255.0
                 shadings.append(shading)
 
+            # Channel permutation augmentation Start
             p = random.random()
             if p < self.channel_aug_ratio:
                 channel_perm = np.random.permutation(3)
@@ -101,27 +109,36 @@ class RelightingDataset(Dataset):
                 for i in range(len(shadings)):
                     shadings[i] = shadings[i][..., channel_perm]
                 prompt = ""  # remove prompt in case channel augmentation leads to different color
+            # Channel Permutation Augmentation End
+
             shadings = np.concatenate(shadings, axis=2)
             shadings = shadings.astype(np.float32)
             if self.log_encode_hint:
                 shadings = np.log(shadings + 1.0)
             target = target.astype(np.float32)
             source = source.astype(np.float32)
+
             if self.use_black_image_filter:
                 assert (
                     source.max(axis=2).mean() > 0.02
                 ), f"black ref image: {source_filename}"
 
             hint = np.concatenate([source, shadings], axis=2)
+
+            # Mask Importing
             # if there is 'mask' key in the item, use it as mask
             if "mask" in item:
                 mask_path = item["mask"]
                 mask = imageio.v3.imread(mask_path)
                 if mask.shape[-1] > 1:
-                    mask = mask[..., 0]
-                # print("mask shape", mask.shape)
+                    # bgr to grayscale (single channel)
+                    mask = cv2.cvtColor(mask, cv2.COLOR_BGR2GRAY)
 
-            else:
+                # if mask max value > 1, then normalize it
+                if mask.max() > 1:
+                    mask = mask / 255.0
+
+            else:  # no 'mask' column in the item
                 try:
                     depth_path = "/".join(
                         item["image"].split("/")[:-2] + ["depth0001.exr"]
@@ -132,22 +149,23 @@ class RelightingDataset(Dataset):
                 except Exception as e:
                     print(f"Error loading depth: {e}")
                     mask = np.ones_like(source[..., 0])
+
             if self.use_black_image_filter:
                 assert np.mean(mask) > 0.1, f"low fg ratio: {source_filename}"
             if self.load_mask:
                 # print("hint shape", hint.shape)
                 # print("mask shape", mask.shape)
-                try:
+                try:  # mask shape: (H, W, 1) or (H, W)
+                    # hint: shape (H, W, C) rgb
                     if len(mask.shape) == len(hint.shape):
                         hint = np.concatenate([mask.astype(np.float32), hint], axis=2)
                     else:
+                        # mask has 1 less channel
                         hint = np.concatenate(
-                            [mask.astype(np.float32)[..., None], hint], axis=2
+                            [mask[..., None].astype(np.float32), hint], axis=2
                         )
-
-                    # else:
-                    #     raise ValueError("mask shape not supported")
                 except Exception as e:
+                    print("====================================")
                     print("Error concatenating mask: ", e)
                     print("mask shape", mask.shape)
                     print("hint shape", hint.shape)
@@ -157,6 +175,7 @@ class RelightingDataset(Dataset):
             p = random.random()
             if p < self.empty_prompt_ratio:
                 prompt = ""
+
             # tokenize prompt
             inputs = self.tokenizer(
                 prompt,
@@ -171,12 +190,14 @@ class RelightingDataset(Dataset):
             print(idx, repr(e), e)
             return self.__getitem__(np.random.randint(0, len(self.data)))
 
-        # print("pixel_values.shape", target.transpose(2, 0, 1).shape)
-        # print("conditioning pixel_values.shape", hint.transpose(2, 0, 1).shape)
+        # target, hint np.ndarray to torch tensor
+        target = torch.from_numpy(target.transpose(2, 0, 1))  # (H, W, C) -> (C, H, W)
+        hint = torch.from_numpy(hint.transpose(2, 0, 1))  # (H, W, C) -> (C, H, W)
+
         return dict(
-            pixel_values=target.transpose(2, 0, 1),
+            pixel_values=target,
             input_ids=inputs.input_ids[0],
-            conditioning_pixel_values=hint.transpose(2, 0, 1),
+            conditioning_pixel_values=hint,
             text=prompt,
             target_file=target_filename,
             ref_file=source_filename,
