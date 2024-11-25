@@ -1,7 +1,12 @@
 from dataclasses import dataclass, field
 from typing import List, Dict, Optional
-import json
 import os
+
+# dataset json, dataloader generator
+import json
+from torch.utils.data import Dataset, DataLoader
+
+import pandas as pd
 
 
 @dataclass
@@ -12,14 +17,14 @@ class DataSetDefinition:
     light_condition_path_list, openillumnination 저자 제공 env map을 사용 하는 것으로 한다.
 
     """
-    
-    processed_dir_suffix: Optional[str] = None 
+
+    processed_dir_suffix: Optional[str] = None
     # resolution_4x: bool = False
     # if resolution_4x:
     #     resolution = 512
     # else:
     #     resolution = 128
-        
+
     processed_data_root_dir: str = "./data/processed"
     raw_data_root_dir: str = field(default="./data/lighting_patterns")
     split: List[str] = field(default_factory=lambda: ["train", "eval"])
@@ -83,7 +88,7 @@ class DataSetDefinition:
     eval_split: List[str] = field(default_factory=lambda: [])
 
     def __post_init__(self):
-        
+
         with open(self.data_definition_json_path, "r") as f:
             self.raw_data_definition = json.load(f)
 
@@ -102,7 +107,7 @@ class DataSetDefinition:
         split = self.step1_split_generator()
         self.step1_datadict_train_list = split["train"]
         self.step1_datadict_eval_list = split["eval"]
-    
+
     def get_step2_json(self):
         split = self.step2_dict_generator()
         return split
@@ -150,7 +155,7 @@ class DataSetDefinition:
     def step1_split_generator(self):
         """
         cropping and train test split
-        
+
         """
         step1_datadict_train_list = []
         step1_datadict_eval_list = []
@@ -197,7 +202,9 @@ class DataSetDefinition:
 
         return {"train": step1_datadict_train_list, "eval": step1_datadict_eval_list}
 
-    def step2_dict_generator(self, resolution_4x: bool = False):
+    def step2_dict_generator(
+        self, resolution_4x: bool = False, with_radiance_hint: bool = False
+    ):
         """
         args.image_path
         args.mask_path
@@ -206,42 +213,43 @@ class DataSetDefinition:
         args.image_id  # key
         args.output_dir  # processed root dir
         args.fov = None  # 그러면 mesh_reconstruction에서 계산하게 된다.
-        args.mask_threshold: float = 0.25  #    
+        args.mask_threshold: float = 0.25  #
         args.env_map  # path to hdf
         args.pls = [[0,0,0]]  # euler angle로 environmental map을 회전하는 것이다.
         args.use_gpu_for_rendering = True  # 무조건
-        
+
         """
-        
+
         step2_datadict_train_list = []
         step2_datadict_eval_list = []
-        
-        datadict_list ={
-            "train": [],
-            "eval": []
-        }
-        
+
+        datadict_list = {"train": [], "eval": []}
+
         # /data1/common_datasets/openillumination/processed/train/images/obj_01_car/
         # /data1/common_datasets/openillumination/processed/train/masks/obj_01_car/obj_01_car_CA2.png
-        
+
         # step 3에서 viewpoint별로 정렬 해주고, 013에 대해서 가장 object 식별하기 좋아서 이걸로 해줘야 겠다.
-        
+
         for each_split in self.split:
             for each_class in self.class_name_list:
-                
+
                 step1_root_dir = step2_root_dir = self.processed_data_root_dir
-                
+
                 if self.processed_dir_suffix is not None:
-                    step2_root_dir = os.path.join(step2_root_dir, self.processed_dir_suffix)
-                
+                    step2_root_dir = os.path.join(
+                        step2_root_dir, self.processed_dir_suffix
+                    )
+
                 if resolution_4x:
                     step1_root_dir = os.path.join(step1_root_dir, "4x")
                     step2_root_dir = os.path.join(step2_root_dir, "4x")
                     resolution = 512
-                else: 
+                else:
                     resolution = 128
-                
-                class_dir = os.path.join(step1_root_dir, each_split, "images", each_class)
+
+                class_dir = os.path.join(
+                    step1_root_dir, each_split, "images", each_class
+                )
                 path_list = os.listdir(class_dir)
                 for each_image_path in path_list:
                     base_name = os.path.basename(each_image_path)
@@ -249,44 +257,135 @@ class DataSetDefinition:
 
                     view_point = base_name.split("_")[-1]
                     light_condition = base_name.split("_")[-2]
-                    image_id = base_name.split("_")[0] + "_" + base_name.split("_")[1] + "_" + base_name.split("_")[2]
-                    
+                    image_id = (
+                        base_name.split("_")[0]
+                        + "_"
+                        + base_name.split("_")[1]
+                        + "_"
+                        + base_name.split("_")[2]
+                    )
+
                     mask_path = os.path.join(
-                        step1_root_dir, each_split, "masks", each_class, 
-                        f"{each_class}_{view_point}.png"
+                        step1_root_dir,
+                        each_split,
+                        "masks",
+                        each_class,
+                        f"{each_class}_{view_point}.png",
                     )
-                    datadict_list[each_split].append(
-                        {
-                            "image_path": os.path.join(class_dir, each_image_path),
-                            "mask_path": mask_path,
-                            "viewpoint_id": view_point,
-                            "lighting_condition_id": light_condition,
-                            "image_id": image_id,
-                            "output_dir": os.path.join(step2_root_dir, each_split, "hints"),
-                            "fov": None,
-                            "mask_threshold": 0.25,
-                            "env_map": self.light_condition_path_list[light_condition],
-                            "pls": [[0,0,0]],
-                            "use_gpu_for_rendering": True,
-                            "resolution": resolution
-                        }
-                    )
+
+                    output_dir_root = os.path.join(step2_root_dir, each_split)
+
+                    # radiance_hint_output_dir_root = os.path.join(
+                    #     step2_root_dir, each_split, "hints"
+                    # )
+
+                    _elem_dict = {
+                        "image_id": image_id,
+                        "viewpoint_id": view_point,
+                        "lighting_condition_id": light_condition,
+                        "image_path": os.path.join(class_dir, each_image_path),  # 이거
+                        "mask_path": mask_path,  # 이거
+                        "output_dir": os.path.join(output_dir_root, "hints"),
+                        "fov": None,
+                        "mask_threshold": 0.25,
+                        "env_map": self.light_condition_path_list[light_condition],
+                        "pls": [[0, 0, 0]],
+                        "use_gpu_for_rendering": True,
+                        "resolution": resolution,
+                    }
+                    # /data2/common_datasets/openillumination/processed/4x/train/hints/obj_01_car/CA2/002/
+                    if with_radiance_hint:
+                        _elem_dict.update(
+                            {
+                                "image_path": os.path.join(
+                                    output_dir_root,
+                                    "images",
+                                    each_class,
+                                    each_image_path,
+                                ),
+                                "mask_path": os.path.join(
+                                    output_dir_root,
+                                    "masks",
+                                    each_class,
+                                    f"{each_class}_{view_point}.png",
+                                ),
+                                "hint_diffuse_path": os.path.join(
+                                    output_dir_root,
+                                    "hints",
+                                    each_class,
+                                    view_point,
+                                    light_condition,
+                                    "hint00_diffuse.png",
+                                ),
+                                "hint_ggx0.05_path": os.path.join(
+                                    output_dir_root,
+                                    "hints",
+                                    each_class,
+                                    view_point,
+                                    light_condition,
+                                    "hint00_ggx0.05.png",
+                                ),
+                                "hint_ggx0.13_path": os.path.join(
+                                    output_dir_root,
+                                    "hints",
+                                    each_class,
+                                    view_point,
+                                    light_condition,
+                                    "hint00_ggx0.13.png",
+                                ),
+                                "hint_ggx0.34_path": os.path.join(
+                                    output_dir_root,
+                                    "hints",
+                                    each_class,
+                                    view_point,
+                                    light_condition,
+                                    "hint00_ggx0.34.png",
+                                ),
+                            }
+                        )
+                    datadict_list[each_split].append(_elem_dict)
         return datadict_list
-    
-    def step3_data_mover(self):
-        """
-        processed
-        -> processed/resolution_1x
-            -> processed/resolution_1x/train
-                -> processed/resolution_1x/train/obj_xx_xxx/
-                    (GT reference image, mask, hint_diffuse, hint_ggx0.05, hint_ggx0.13, hint_ggx0.34)
-            -> processed/resolution_1x/eval
-        -> processed/resolution_4x
-            -> processed/resolution_4x/train
-            -> processed/resolution_4x/eval
-        여기는 학습하게 편하게 dataset을 재구성 해주는 것을 목표로 한다.
+
+    def input_jsonl_generator(self, resolution_4x: bool = False):
+        raw_dict = self.step2_dict_generator(
+            resolution_4x=resolution_4x, with_radiance_hint=True
+        )
         
-        """
+        raw_df = {}
+        for split, elem_list in raw_dict.items():
+            raw_df[split] = pd.DataFrame(elem_list)
+            raw_df[split] = self.create_ref_column(raw_df[split])  # ref column 추가
+            pass  # caption column 추가
+        
+        # 마지막으로 jsonl로 저장
+        
+    
+    @classmethod
+    def create_ref_column(cls, df):
+        # Group by 'image_id' and 'viewpoint_id'
+        groups = df.groupby(['image_id', 'viewpoint_id'])
+        refs = {}
+
+        # Iterate over each group
+        for (image_id, viewpoint_id), group in groups:
+            # Create a list of image_paths and lighting_condition_ids for the group
+            image_paths = group['image_path'].tolist()
+            lighting_ids = group['lighting_condition_id'].tolist()
+
+            # Iterate over each row in the group
+            for idx, row in group.iterrows():
+                # Exclude the current row's lighting_condition_id
+                ref_paths = [
+                    p for lc_id, p in zip(lighting_ids, image_paths)
+                    if lc_id != row['lighting_condition_id']
+                ]
+                refs[idx] = ref_paths
+
+        # Map the refs to the DataFrame
+        df['ref'] = df.index.map(refs)
+        return df
+
+    def get_caption(self):
         pass
 
     def radiance_hint_checker(self):
