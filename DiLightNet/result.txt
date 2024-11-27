@@ -1,0 +1,6 @@
+Looking in indexes: https://pypi.org/simple, https://pypi.ngc.nvidia.com
+Collecting git+https://github.com/naver/croco/#subdirectory=models/curope
+  Cloning https://github.com/naver/croco/ to /tmp/pip-req-build-n3hxqk4m
+  Resolved https://github.com/naver/croco/ to commit d3d0ab2858d44bcad54e5bfc24f565983fbe18d9
+  Preparing metadata (setup.py): started
+  Preparing metadata (setup.py): finished with status 'error'

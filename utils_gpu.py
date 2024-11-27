@@ -13,6 +13,9 @@ import numpy as np
 import cv2
 import simple_parsing
 from transformers import pipeline
+from transformers import Blip2Processor, Blip2ForConditionalGeneration
+import torch
+
 
 from easydict import EasyDict
 
@@ -28,16 +31,30 @@ from DiLightNet.demo.rm_bg import rm_bg
 
 # caption generator
 class CaptionGenerator:
-    def __init__(self):
+    def __init__(self, device: str = "cuda:0"):
         # Use a pipeline as a high-level helper
 
-        self.pipe = pipeline("image-to-text", model="Salesforce/blip2-opt-2.7b")
+        self.pipe = pipeline("image-to-text", model="Salesforce/blip2-opt-2.7b", device=device)
 
     def __call__(self, img_path):
         image = Image.open(img_path).convert("RGB")
         caption = self.pipe(image)
         return caption[0]["generated_text"]
 
+class BLIPI2T:
+    def __init__(self):
+        self.model = Blip2ForConditionalGeneration.from_pretrained("Salesforce/blip2-opt-2.7b", torch_dtype=torch.float16).to("cuda:0")
+        self.processor = Blip2Processor.from_pretrained("Salesforce/blip2-opt-2.7b")
+        
+    def __call__(self, img_path):
+        image = Image.open(img_path) # .convert("RGB")
+        
+        # import ipdb; ipdb.set_trace()
+        inputs = self.processor(images=image, return_tensors="pt").to("cuda", torch.float16)
+        caption = self.model.generate(**inputs)
+        caption = self.processor.decode(caption[0], skip_special_tokens=True)
+        return caption
+    
 
 # radiance hints generation
 @dataclass
@@ -173,11 +190,30 @@ def elem_generate_hint(args: dict):
     output_folder = os.path.join(args.output_dir, image_id, viewpoint_id, lighting_condition_id)
     if not os.path.exists(output_folder):
         os.makedirs(output_folder)
-
-    print(
+    
+    render_target = [
+        os.path.join(output_folder, f"hint00_diffuse.png"),
+        os.path.join(output_folder, f"hint00_ggx0.05.png"),
+        os.path.join(output_folder, f"hint00_ggx0.13.png"),
+        os.path.join(output_folder, f"hint00_ggx0.34.png"),
+    ]
+    sentinel = True
+    for each_render_target in render_target:
+        if os.path.exists(each_render_target):
+            sentinel *= True
+        else:
+            sentinel *= False
+            
+    if sentinel:
+        print(f"Radiance hints already rendered to {output_folder}")
+        return
+    else:
+        print(
         f"Rendering radiance hints for {image_path} with viewpoint {viewpoint_id} and lighting condition {lighting_condition_id}"
     )
     # Mesh reconstruction and fov estimation for hints rendering
+    
+    
     fov = args.fov
     mesh, fov = mesh_reconstruction(image, mask, False, fov, args.mask_threshold)
     # TODO make mesh from colmap maybe better?
@@ -188,7 +224,7 @@ def elem_generate_hint(args: dict):
         env_map=args.env_map,
         pls=args.pls,
         output_folder=output_folder,
-        resolution=args.resolution
+        resolution=args.resolution,
         use_gpu=args.use_gpu_for_rendering,
     )
     print(f"Radiance hints rendered to {output_folder}")
