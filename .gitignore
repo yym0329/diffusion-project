@@ -5,6 +5,7 @@ radiance_hints/
 dataset/
 wandb/
 runs/
+custom_train/dataset_v2/
 # cache
 .pyc
 

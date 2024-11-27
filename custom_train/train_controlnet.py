@@ -90,6 +90,7 @@ def log_validation(
     step,
     is_final_validation=False,
 ):
+
     logger.info("Running validation... ")
 
     if not is_final_validation:
@@ -123,20 +124,6 @@ def log_validation(
     else:
         generator = torch.Generator(device=accelerator.device).manual_seed(args.seed)
 
-    # if len(args.validation_image) == len(args.validation_prompt):
-    #     validation_images = args.validation_image
-    #     validation_prompts = args.validation_prompt
-    # elif len(args.validation_image) == 1:
-    #     validation_images = args.validation_image * len(args.validation_prompt)
-    #     validation_prompts = args.validation_prompt
-    # elif len(args.validation_prompt) == 1:
-    #     validation_images = args.validation_image
-    #     validation_prompts = args.validation_prompt * len(args.validation_image)
-    # else:
-    #     raise ValueError(
-    #         "number of `args.validation_image` and `args.validation_prompt` should be checked in `parse_args`"
-    #     )
-
     image_logs = []
     inference_ctx = (
         contextlib.nullcontext() if is_final_validation else torch.autocast("cuda")
@@ -146,8 +133,8 @@ def log_validation(
         i = random.randint(0, len(validation_dataset))
         batch = validation_dataset[i]
         prompt = batch["text"]
-        validation_image = torch.from_numpy(batch["conditioning_pixel_values"]).to(
-            accelerator.device
+        validation_image = batch["conditioning_pixel_values"].to(
+            accelerator.device, dtype=weight_dtype
         )[None]
 
         images = []
@@ -167,9 +154,12 @@ def log_validation(
             "conditioning_pixel_values"
         ]  # hints. [mask, ref image , diffuse, 3*ggx]
 
-        logger.info(f"images shape: {cond_pixels.shape}")
         if args.add_mask:
             cond_pixels = cond_pixels[1:]  # skip mask
+        # to numpy
+        cond_pixels = cond_pixels.cpu().numpy()
+        target_image = batch["pixel_values"].cpu().numpy()
+        target_image = (target_image / 2.0 + 0.5).transpose(1, 2, 0)
         image_logs.append(
             {
                 "ref_textured_image": cond_pixels[:3, :, :]
@@ -181,7 +171,7 @@ def log_validation(
                 "ggx034_hint_image": cond_pixels[-3:, :, :]
                 .transpose(1, 2, 0)
                 .clip(0, 1),
-                "target_image": (batch["pixel_values"] / 2.0 + 0.5).transpose(1, 2, 0),
+                "target_image": target_image.clip(0, 1),
                 "images": images,
                 "validation_prompt": prompt,
                 "target_filepath": batch["target_file"],
@@ -190,6 +180,9 @@ def log_validation(
             }
         )
     for tracker in accelerator.trackers:
+        print(
+            "============================ Logging validation images ============================"
+        )
         if tracker.name == "tensorboard":
             for log in image_logs:
                 images = log["images"]
@@ -214,6 +207,9 @@ def log_validation(
                     validation_prompt, formatted_images, step, dataformats="NHWC"
                 )
         elif tracker.name == "wandb":
+            print(
+                "======================================= We are logging to wandb ========================================"
+            )
             text_table = wandb.Table(
                 columns=["steps", "target_file", "ref_file", "prompt"]
             )
@@ -245,7 +241,7 @@ def log_validation(
                 )
 
                 for image in images:
-                    logger.info(f"image shape: {image.shape}")
+                    # logger.info(f"image shape: {image.shape}")
                     image = wandb.Image(
                         image, caption=(model_id + " " + validation_prompt)
                     )
@@ -953,6 +949,7 @@ def main(args):
         datefmt="%m/%d/%Y %H:%M:%S",
         level=logging.INFO,
     )
+
     logger.info(accelerator.state, main_process_only=False)
     if accelerator.is_local_main_process:
         transformers.utils.logging.set_verbosity_warning()
@@ -1163,23 +1160,17 @@ def main(args):
         collate_fn=collate_fn,
         batch_size=args.train_batch_size,
         num_workers=args.dataloader_num_workers,
+        pin_memory=True,
+        persistent_workers=True,
     )
 
-    validataion_dataset = RelightingDataset(
+    validation_dataset = RelightingDataset(
         data_jsonl=args.validation_dataset_name,
         pretrained_model=args.pretrained_model_name_or_path,
         channel_aug_ratio=args.proportion_channel_aug,  # add to args
         empty_prompt_ratio=args.proportion_empty_prompts,  # add to args
         log_encode_hint=args.log_encode_hint,  # add to args
         load_mask=args.add_mask,  # add to args
-    )
-
-    validation_dataloader = torch.utils.data.DataLoader(
-        validataion_dataset,
-        shuffle=False,
-        collate_fn=collate_fn,
-        batch_size=args.train_batch_size,
-        num_workers=args.dataloader_num_workers,
     )
 
     # Scheduler and math around the number of training steps.
@@ -1415,12 +1406,10 @@ def main(args):
                         accelerator.save_state(save_path)
                         logger.info(f"Saved state to {save_path}")
 
-                    if (
-                        args.validation_prompt is not None
-                        and global_step % args.validation_steps == 0
-                    ):
+                    if global_step % args.validation_steps == 0:
+
                         image_logs = log_validation(
-                            validation_dataloader,
+                            validation_dataset,
                             vae,
                             text_encoder,
                             tokenizer,
@@ -1431,6 +1420,14 @@ def main(args):
                             weight_dtype,
                             global_step,
                         )
+                        for log in image_logs:
+                            # save images to local disk
+                            save_path = os.path.join(
+                                args.output_dir, f"step_{global_step}"
+                            )
+                            os.makedirs(save_path, exist_ok=True)
+                            for i, image in enumerate(log["images"]):
+                                image.save(os.path.join(save_path, f"image_{i}.png"))
 
             logs = {"loss": loss.detach().item(), "lr": lr_scheduler.get_last_lr()[0]}
             progress_bar.set_postfix(**logs)
@@ -1447,20 +1444,20 @@ def main(args):
 
         # Run a final round of validation.
         image_logs = None
-        if args.validation_prompt is not None:
-            image_logs = log_validation(
-                validation_dataloader,
-                vae=vae,
-                text_encoder=text_encoder,
-                tokenizer=tokenizer,
-                unet=unet,
-                controlnet=None,
-                args=args,
-                accelerator=accelerator,
-                weight_dtype=weight_dtype,
-                step=global_step,
-                is_final_validation=True,
-            )
+
+        image_logs = log_validation(
+            validation_dataset,
+            vae=vae,
+            text_encoder=text_encoder,
+            tokenizer=tokenizer,
+            unet=unet,
+            controlnet=None,
+            args=args,
+            accelerator=accelerator,
+            weight_dtype=weight_dtype,
+            step=global_step,
+            is_final_validation=True,
+        )
 
         if args.push_to_hub:
             save_model_card(

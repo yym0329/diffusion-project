@@ -142,7 +142,7 @@ class NeuralTextureEmbedding(nn.Module):
         import cv2
 
         # c,h,w -> h,w,c
-        cond_img_to_save = conditioning[0, :3].detach().cpu().numpy().transpose(1, 2, 0)
+        cond_img_to_save = conditioning[0, 1:].detach().cpu().numpy().transpose(1, 2, 0)
         shading_hint1 = shading_hint[0, 3:6].detach().cpu().numpy().transpose(1, 2, 0)
         shading_hint2 = shading_hint[0, 6:9].detach().cpu().numpy().transpose(1, 2, 0)
         shading_hint3 = shading_hint[0, 9:].detach().cpu().numpy().transpose(1, 2, 0)

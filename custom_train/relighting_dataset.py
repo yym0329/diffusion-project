@@ -51,6 +51,8 @@ class RelightingDataset(Dataset):
         else:
             raise ValueError("No data source specified.")
 
+        self.data = self.data * 100
+
     def __len__(self):
         return len(self.data)
 
@@ -131,8 +133,8 @@ class RelightingDataset(Dataset):
                 mask_path = item["mask"]
                 mask = imageio.v3.imread(mask_path)
                 if mask.shape[-1] > 1:
-                    # bgr to grayscale (single channel)
-                    mask = cv2.cvtColor(mask, cv2.COLOR_BGR2GRAY)
+
+                    mask = mask[..., 0]
 
                 # if mask max value > 1, then normalize it
                 if mask.max() > 1:
