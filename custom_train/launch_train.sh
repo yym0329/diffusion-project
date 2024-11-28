@@ -1,6 +1,6 @@
 accelerate launch train_controlnet.py \
   --pretrained_model_name_or_path="stabilityai/stable-diffusion-2-1-base" \
-  --output_dir=dilightnet-openillum-2-1-2-base-v2 \
+  --output_dir=runs/dilightnet-openillum-2-1-2-base-v2 \
   --dataset_name="dataset_v2/train_v2.jsonl" \
   --validation_dataset_name="dataset_v2/eval_v2.jsonl" \
   --resolution=128 \
@@ -23,7 +23,7 @@ accelerate launch train_controlnet.py \
   --add_mask \
   --checkpoints_total_limit=5 \
   --tracker_project_name="dilightnet-openillum-main-exp" \
-  --controlnet_model_name_or_path="dilightnet-openillum-2-1-2-base-v2/checkpoint-10000/controlnet"
+  --controlnet_model_name_or_path="runs/dilightnet-openillum-2-1-2-base-v2/checkpoint-10000/controlnet"
   # --resume_from_checkpoint=latest \
   # --resume_from_checkpoint="latest" \
 
