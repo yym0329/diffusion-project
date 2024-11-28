@@ -6,6 +6,7 @@ dataset/
 wandb/
 runs/
 custom_train/dataset_v2/
+custom_train/*dataset*/
 # cache
 .pyc
 

@@ -27,6 +27,7 @@ class RelightingDataset(Dataset):
         use_black_image_filter=False,
         eval_mode=False,
         direct_data=None,
+        multiplication=None,
     ):
         self.data = []
         self.tokenizer = AutoTokenizer.from_pretrained(
@@ -51,7 +52,8 @@ class RelightingDataset(Dataset):
         else:
             raise ValueError("No data source specified.")
 
-        self.data = self.data * 100
+        if multiplication is not None:
+            self.data = self.data * multiplication
 
     def __len__(self):
         return len(self.data)
