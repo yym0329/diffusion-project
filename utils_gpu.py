@@ -46,6 +46,29 @@ class BLIPI2T:
         self.model = Blip2ForConditionalGeneration.from_pretrained("Salesforce/blip2-opt-2.7b", torch_dtype=torch.float16).to("cuda:0")
         self.processor = Blip2Processor.from_pretrained("Salesforce/blip2-opt-2.7b")
         
+        # self.model = Blip2ForConditionalGeneration.from_pretrained("Salesforce/blip2-flan-t5-xl", load_in_8bit=True, device_map="auto")
+        # self.processor = Blip2Processor.from_pretrained("Salesforce/blip2-flan-t5-xl")
+        
+    def __call__(self, img_path):
+        image = Image.open(img_path) # .convert("RGB")
+        
+        # import ipdb; ipdb.set_trace()
+        inputs = self.processor(images=image, return_tensors="pt").to("cuda", torch.float16)
+        caption = self.model.generate(**inputs)
+        caption = self.processor.decode(caption[0], skip_special_tokens=True)
+        return caption
+
+
+class BLIPI2TLarge:
+    # /data2/code/diffusion-project/weight/blip2-flan-t5-xl
+    def __init__(self):
+        # self.model = Blip2ForConditionalGeneration.from_pretrained("Salesforce/blip2-opt-2.7b", torch_dtype=torch.float16).to("cuda:0")
+        # self.processor = Blip2Processor.from_pretrained("Salesforce/blip2-opt-2.7b")
+        # /data2/code/diffusion-project/weight/blip2-flan-t5-xl
+        
+        self.model = Blip2ForConditionalGeneration.from_pretrained(pretrained_model_name_or_path="Salesforce/blip2-flan-t5-xl", cache_dir="/data2/code/diffusion-project/weight/blip2-flan-t5-xl", load_in_8bit=True, device_map="auto")
+        self.processor = Blip2Processor.from_pretrained("Salesforce/blip2-flan-t5-xl")
+        
     def __call__(self, img_path):
         image = Image.open(img_path) # .convert("RGB")
         
@@ -55,7 +78,6 @@ class BLIPI2T:
         caption = self.processor.decode(caption[0], skip_special_tokens=True)
         return caption
     
-
 # radiance hints generation
 @dataclass
 class Args:
@@ -191,12 +213,19 @@ def elem_generate_hint(args: dict):
     if not os.path.exists(output_folder):
         os.makedirs(output_folder)
     
-    render_target = [
-        os.path.join(output_folder, f"hint00_diffuse.png"),
-        os.path.join(output_folder, f"hint00_ggx0.05.png"),
-        os.path.join(output_folder, f"hint00_ggx0.13.png"),
-        os.path.join(output_folder, f"hint00_ggx0.34.png"),
-    ]
+    if args.extended:
+        extended_mat_list = [0.05, 0.1000, 0.1500, 0.2000, 0.2500, 0.3000, 0.3500, 0.4000, 0.4500, 0.5000, 0.5500, 0.6000, 0.6500]
+        render_target = []
+        for each in extended_mat_list:
+            render_target.append(os.path.join(output_folder, f"hint00_ggx{each}.png"))
+    else:
+        render_target = [
+            os.path.join(output_folder, f"hint00_diffuse.png"),
+            os.path.join(output_folder, f"hint00_ggx0.05.png"),
+            os.path.join(output_folder, f"hint00_ggx0.13.png"),
+            os.path.join(output_folder, f"hint00_ggx0.34.png"),
+        ]
+        
     sentinel = True
     for each_render_target in render_target:
         if os.path.exists(each_render_target):
@@ -226,6 +255,7 @@ def elem_generate_hint(args: dict):
         output_folder=output_folder,
         resolution=args.resolution,
         use_gpu=args.use_gpu_for_rendering,
+        extended=args.extended,
     )
     print(f"Radiance hints rendered to {output_folder}")
 
