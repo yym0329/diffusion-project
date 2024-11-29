@@ -7,6 +7,10 @@ wandb/
 runs/
 custom_train/dataset_v2/
 custom_train/*dataset*/
+custom_train/eval_gt/
+custom_train/eval_gt.tar
+custom_train/diligitnet-*
+custom_train/runs*/
 # cache
 .pyc
 

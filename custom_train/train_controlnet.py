@@ -1151,7 +1151,7 @@ def main(args):
         empty_prompt_ratio=args.proportion_empty_prompts,  # add to args
         log_encode_hint=args.log_encode_hint,  # add to args
         load_mask=args.add_mask,  # add to args
-        multiplication=100,
+        multiplication=50,
     )
     # train_dataset = make_train_dataset(args, tokenizer, accelerator)
 
