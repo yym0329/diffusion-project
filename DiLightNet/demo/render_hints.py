@@ -17,6 +17,7 @@ def render_hint_images(
     env_start_azi=0.0,
     resolution=512,
     use_gpu=False,
+    extended=False,
 ):
     import bpy
     import numpy as np
@@ -31,66 +32,74 @@ def render_hint_images(
     from bpy_helper.utils import stdout_redirected
     
     
-    # def configure_blender():
-    #     # Set the render resolution
-    #     bpy.context.scene.render.resolution_x = resolution
-    #     bpy.context.scene.render.resolution_y = resolution
-    #     bpy.context.scene.render.engine = 'CYCLES'
-    #     bpy.context.scene.cycles.samples = 512
-    #     if use_gpu:
-    #         bpy.context.preferences.addons["cycles"].preferences.get_devices()
-    #         bpy.context.scene.cycles.device = 'GPU'
-    #         bpy.context.preferences.addons['cycles'].preferences.compute_device_type = 'CUDA'
-    #         bpy.context.scene.render.threads = 8
-    #         bpy.context.scene.render.threads_mode = 'FIXED'
-
-    #     # Enable the alpha channel for GT mask
-    #     bpy.context.scene.render.film_transparent = True
-    #     bpy.context.scene.render.image_settings.color_mode = 'RGBA'
-
     def configure_blender():
         # Set the render resolution
         bpy.context.scene.render.resolution_x = resolution
         bpy.context.scene.render.resolution_y = resolution
-        bpy.context.scene.render.engine = "CYCLES"
+        bpy.context.scene.render.engine = 'CYCLES'
         bpy.context.scene.cycles.samples = 512
-
-        # import ipdb; ipdb.set_trace()
-
         if use_gpu:
-            # Set the compute device type to 'OPTIX'
-            preferences = bpy.context.preferences.addons['cycles'].preferences
-            preferences.compute_device_type = 'CUDA'
-
-            # Refresh the list of devices
-            preferences.get_devices()
-
-            # Set the device for the scene
+            bpy.context.preferences.addons["cycles"].preferences.get_devices()
             bpy.context.scene.cycles.device = 'GPU'
-
-            # import ipdb; ipdb.set_trace()
-            # Enable the GPU device
-            for device in preferences.devices:
-                if device.type == 'CUDA':
-                    device.use = False
-                elif device.type == "CPU":
-                    device.use = False
-                else:
-                    device.use = True
-                
-            # bpy.context.preferences.addons["cycles"].preferences.devices[-1].use = True
+            bpy.context.preferences.addons['cycles'].preferences.compute_device_type = 'CUDA'
+            bpy.context.scene.render.threads = 8
+            bpy.context.scene.render.threads_mode = 'FIXED'
 
         # Enable the alpha channel for GT mask
         bpy.context.scene.render.film_transparent = True
-        bpy.context.scene.render.image_settings.color_mode = "RGBA"
+        bpy.context.scene.render.image_settings.color_mode = 'RGBA'
 
-    def render_rgb_and_hint(output_path):
-        MAT_DICT = {
-            "_diffuse": create_white_diffuse_material(),
-            "_ggx0.05": create_specular_ggx_material(0.05),
-            "_ggx0.13": create_specular_ggx_material(0.13),
-            "_ggx0.34": create_specular_ggx_material(0.34),
-        }
+    # def configure_blender():
+    #     # Set the render resolution
+    #     bpy.context.scene.render.resolution_x = resolution
+    #     bpy.context.scene.render.resolution_y = resolution
+    #     bpy.context.scene.render.engine = "CYCLES"
+    #     bpy.context.scene.cycles.samples = 512
+
+    #     # import ipdb; ipdb.set_trace()
+
+    #     if use_gpu:
+    #         # Set the compute device type to 'OPTIX'
+    #         preferences = bpy.context.preferences.addons['cycles'].preferences
+    #         preferences.compute_device_type = 'CUDA'
+
+    #         # Refresh the list of devices
+    #         preferences.get_devices()
+
+    #         # Set the device for the scene
+    #         bpy.context.scene.cycles.device = 'GPU'
+
+    #         # import ipdb; ipdb.set_trace()
+    #         # Enable the GPU device
+    #         for device in preferences.devices:
+    #             if device.type == 'CUDA':
+    #                 device.use = False
+    #             elif device.type == "CPU":
+    #                 device.use = False
+    #             else:
+    #                 device.use = True
+                
+    #         # bpy.context.preferences.addons["cycles"].preferences.devices[-1].use = True
+
+    #     # Enable the alpha channel for GT mask
+    #     bpy.context.scene.render.film_transparent = True
+    #     bpy.context.scene.render.image_settings.color_mode = "RGBA"
+
+    def render_rgb_and_hint(output_path, extended=False):
+        if extended:
+            extended_mat_list = [0.05, 0.1000, 0.1500, 0.2000, 0.2500, 0.3000, 0.3500, 0.4000, 0.4500, 0.5000, 0.5500, 0.6000, 0.6500]
+            extended_mat_dict = {"_diffuse": create_white_diffuse_material()}
+            for radiance in extended_mat_list:
+                extended_mat_dict[f"_ggx{radiance}"] = create_specular_ggx_material(radiance)
+                MAT_DICT = extended_mat_dict
+        else:
+            MAT_DICT = {
+                "_diffuse": create_white_diffuse_material(),
+                "_ggx0.05": create_specular_ggx_material(0.05),
+                "_ggx0.13": create_specular_ggx_material(0.13),
+                "_ggx0.34": create_specular_ggx_material(0.34),
+            }
+            
 
         # render
         for mat_name, mat in tqdm(MAT_DICT.items(), desc="Rendering RGB and Hints", leave=True):
@@ -129,7 +138,7 @@ def render_hint_images(
             _point_light = create_point_light(pl_pos, power)
 
         with stdout_redirected():
-            render_rgb_and_hint(output_folder + f"/hint{i:02d}")
+            render_rgb_and_hint(output_folder + f"/hint{i:02d}", extended=extended)
 
     return output_folder
 

@@ -75,7 +75,7 @@ def directory_composer(cli_arg):
 def radiance_compute(cli_arg):
     ray.init()
 
-    wrapped_elem_generate_hint = ray.remote(num_gpus=cli_arg.num_gpus, num_cpus=4)(
+    wrapped_elem_generate_hint = ray.remote(num_gpus=cli_arg.num_gpus, num_cpus=2)(
         elem_generate_hint
     )
 
@@ -84,7 +84,7 @@ def radiance_compute(cli_arg):
         processed_dir_suffix=cli_arg.processed_dir_suffix,
     )
 
-    step2_dict = dataset_def.step2_dict_generator(resolution_4x=cli_arg.resolution_4x)
+    step2_dict = dataset_def.step2_dict_generator(resolution_4x=cli_arg.resolution_4x, extended_radiance_hint=cli_arg.extended_radiance_hint)
 
     ray_pack = []
 
@@ -103,6 +103,7 @@ if __name__ == "__main__":
     cli_arg.add_argument("--process_target", type=str, default="directory_composer")
     cli_arg.add_argument("--processed_dir_suffix", type=str, default=None)
     cli_arg.add_argument("--resolution_4x", action="store_true")
+    cli_arg.add_argument("--extended_radiance_hint", action="store_true")
     cli_arg.add_argument("--num_gpus", type=float, default=1.0)
 
     cli_arg = cli_arg.parse_args()

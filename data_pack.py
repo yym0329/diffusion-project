@@ -202,8 +202,10 @@ class DataSetDefinition:
 
         return {"train": step1_datadict_train_list, "eval": step1_datadict_eval_list}
 
+        
+
     def step2_dict_generator(
-        self, resolution_4x: bool = False, with_radiance_hint: bool = False
+        self, resolution_4x: bool = False, with_radiance_hint: bool = False, extended_radiance_hint: bool = False
     ):
         """
         args.image_path
@@ -236,7 +238,7 @@ class DataSetDefinition:
                 step1_root_dir = step2_root_dir = self.processed_data_root_dir
 
                 if self.processed_dir_suffix is not None:
-                    step2_root_dir = os.path.join(
+                    step1_root_dir = step2_root_dir = os.path.join(
                         step2_root_dir, self.processed_dir_suffix
                     )
 
@@ -263,7 +265,8 @@ class DataSetDefinition:
                         + base_name.split("_")[1]
                         + "_"
                         + base_name.split("_")[2]
-                    )
+                    )  # buggy
+                    image_id = each_class
 
                     mask_path = os.path.join(
                         step1_root_dir,
@@ -280,7 +283,7 @@ class DataSetDefinition:
                     # )
 
                     _elem_dict = {
-                        "image_id": image_id,
+                        "image_id": image_id,  # buggy
                         "viewpoint_id": view_point,
                         "lighting_condition_id": light_condition,
                         "image_path": os.path.join(class_dir, each_image_path),  # 이거
@@ -292,6 +295,7 @@ class DataSetDefinition:
                         "pls": [[0, 0, 0]],
                         "use_gpu_for_rendering": True,
                         "resolution": resolution,
+                        "extended": extended_radiance_hint,
                     }
                     # /data2/common_datasets/openillumination/processed/4x/train/hints/obj_01_car/CA2/002/
                     if with_radiance_hint:
@@ -350,39 +354,39 @@ class DataSetDefinition:
         raw_dict = self.step2_dict_generator(
             resolution_4x=resolution_4x, with_radiance_hint=True
         )
-        
+
         raw_df = {}
         for split, elem_list in raw_dict.items():
             raw_df[split] = pd.DataFrame(elem_list)
             raw_df[split] = self.create_ref_column(raw_df[split])  # ref column 추가
             pass  # caption column 추가
-        
+
         # 마지막으로 jsonl로 저장
-        
-    
+
     @classmethod
     def create_ref_column(cls, df):
         # Group by 'image_id' and 'viewpoint_id'
-        groups = df.groupby(['image_id', 'viewpoint_id'])
+        groups = df.groupby(["image_id", "viewpoint_id"])
         refs = {}
 
         # Iterate over each group
         for (image_id, viewpoint_id), group in groups:
             # Create a list of image_paths and lighting_condition_ids for the group
-            image_paths = group['image_path'].tolist()
-            lighting_ids = group['lighting_condition_id'].tolist()
+            image_paths = group["image_path"].tolist()
+            lighting_ids = group["lighting_condition_id"].tolist()
 
             # Iterate over each row in the group
             for idx, row in group.iterrows():
                 # Exclude the current row's lighting_condition_id
                 ref_paths = [
-                    p for lc_id, p in zip(lighting_ids, image_paths)
-                    if lc_id != row['lighting_condition_id']
+                    p
+                    for lc_id, p in zip(lighting_ids, image_paths)
+                    if lc_id != row["lighting_condition_id"]
                 ]
                 refs[idx] = ref_paths
 
         # Map the refs to the DataFrame
-        df['ref'] = df.index.map(refs)
+        df["ref"] = df.index.map(refs)
         return df
 
     def get_caption(self):
