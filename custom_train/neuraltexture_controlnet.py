@@ -43,7 +43,9 @@ class ResBlock(nn.Module):
 
 
 class NeuralTextureEncoder(nn.Module):
-    def __init__(self, in_dim=3, out_dim=16, dims=(32, 64, 128), groups=8):
+    def __init__(
+        self, in_dim=3, out_dim=16, dims=(32, 64, 128), groups=8, num_res_blocks=4
+    ):
         super().__init__()
         self.model = nn.Sequential(
             nn.Conv2d(in_dim, dims[0], kernel_size=3, padding=1),
@@ -56,22 +58,32 @@ class NeuralTextureEncoder(nn.Module):
             nn.Conv2d(dims[1], dims[2], kernel_size=3, padding=1, stride=2),
             nn.GroupNorm(num_groups=groups, num_channels=dims[2]),
             nn.SiLU(inplace=True),
-            # res blocks
-            ResBlock(dims[2]),
-            ResBlock(dims[2]),
-            ResBlock(dims[2]),
-            ResBlock(dims[2]),
-            # up 1
-            nn.ConvTranspose2d(dims[2], dims[1], kernel_size=4, padding=1, stride=2),
-            nn.GroupNorm(num_groups=groups, num_channels=dims[1]),
-            nn.SiLU(inplace=True),
-            # up 2
-            nn.ConvTranspose2d(dims[1], dims[0], kernel_size=4, padding=1, stride=2),
-            nn.GroupNorm(num_groups=groups, num_channels=dims[0]),
-            nn.SiLU(inplace=True),
-            # out
-            nn.Conv2d(dims[0], out_dim, kernel_size=3, padding=1),
         )
+        for _ in range(num_res_blocks):
+            self.model.add_module("resblock", ResBlock(dims[2]))
+
+        # up 1
+        self.model.add_module(
+            "up1",
+            nn.ConvTranspose2d(dims[2], dims[1], kernel_size=4, padding=1, stride=2),
+        ),
+        self.model.add_module(
+            "gn1", nn.GroupNorm(num_groups=groups, num_channels=dims[1])
+        ),
+        self.model.add_module("silu1", nn.SiLU(inplace=True)),
+        # up 2
+        self.model.add_module(
+            "up2",
+            nn.ConvTranspose2d(dims[1], dims[0], kernel_size=4, padding=1, stride=2),
+        ),
+        self.model.add_module(
+            "gn2", nn.GroupNorm(num_groups=groups, num_channels=dims[0])
+        ),
+        self.model.add_module("silu2", nn.SiLU(inplace=True)),
+        # out
+        self.model.add_module(
+            "out", nn.Conv2d(dims[0], out_dim, kernel_size=3, padding=1)
+        ),
         self.gradient_checkpointing = False
 
     def forward(self, x):
@@ -89,6 +101,7 @@ class NeuralTextureEmbedding(nn.Module):
         conditioning_channels: int = 3,  # process referential image. If use mask, then 4
         block_out_channels: Tuple[int] = (16, 32, 96, 256),
         shading_hint_channels: int = 12,  # diffuse + 3 * ggx
+        num_res_blocks: int = 4,
     ):
         super().__init__()
         self.conditioning_channels = conditioning_channels
@@ -98,7 +111,9 @@ class NeuralTextureEmbedding(nn.Module):
             shading_hint_channels, block_out_channels[0], kernel_size=3, padding=1
         )
         self.neural_texture_encoder = NeuralTextureEncoder(
-            in_dim=conditioning_channels, out_dim=shading_hint_channels
+            in_dim=conditioning_channels,
+            out_dim=shading_hint_channels,
+            num_res_blocks=num_res_blocks,
         )
 
         self.blocks = nn.ModuleList([])
@@ -138,42 +153,6 @@ class NeuralTextureEmbedding(nn.Module):
             [self.conditioning_channels, self.shading_hint_channels],
             dim=1,
         )
-        # save conditioning and shading hints for visualization as images temp_conditioning, self_hint1, ...
-        import cv2
-
-        # c,h,w -> h,w,c
-        cond_img_to_save = conditioning[0, 1:].detach().cpu().numpy().transpose(1, 2, 0)
-        shading_hint1 = shading_hint[0, 3:6].detach().cpu().numpy().transpose(1, 2, 0)
-        shading_hint2 = shading_hint[0, 6:9].detach().cpu().numpy().transpose(1, 2, 0)
-        shading_hint3 = shading_hint[0, 9:].detach().cpu().numpy().transpose(1, 2, 0)
-        try:
-            # [0,1] to [0, 255]
-            cond_img_to_save = (cond_img_to_save * 255).astype("uint8")
-            # bgr to rgb
-            cond_img_to_save = cv2.cvtColor(cond_img_to_save, cv2.COLOR_RGB2BGR)
-            cv2.imwrite("conditioning.png", cond_img_to_save)
-        except Exception as e:
-            print(e)
-        try:
-            shading_hint1 = (shading_hint1 * 255).astype("uint8")
-            # bgr to rgb
-            shading_hint1 = cv2.cvtColor(shading_hint1, cv2.COLOR_RGB2BGR)
-            cv2.imwrite("hint1.png", shading_hint1)
-        except Exception as e:
-            print(e)
-        try:
-            shading_hint2 = (shading_hint2 * 255).astype("uint8")
-            shading_hint2 = cv2.cvtColor(shading_hint2, cv2.COLOR_RGB2BGR)
-            cv2.imwrite("hint2.png", shading_hint2)
-        except Exception as e:
-            print(e)
-
-        try:
-            shading_hint3 = (shading_hint3 * 255).astype("uint8")
-            shading_hint3 = cv2.cvtColor(shading_hint3, cv2.COLOR_RGB2BGR)
-            cv2.imwrite("hint3.png", shading_hint3)
-        except Exception as e:
-            print(e)
 
         # print("neural texture encoder")
         embedding = self.neural_texture_encoder(conditioning)  # [BS, 15, 512, 512]
@@ -248,6 +227,7 @@ class NeuralTextureControlNetModel(ControlNetModel):
         global_pool_conditions: bool = False,
         addition_embed_type_num_heads: int = 64,
         shading_hint_channels: int = 12,
+        encoder_res_blocks: int = 4,
     ):
         # avoid running __init__() of the original ControlNetModel
         super(ModelMixin, self).__init__()
@@ -394,6 +374,7 @@ class NeuralTextureControlNetModel(ControlNetModel):
             block_out_channels=conditioning_embedding_out_channels,
             conditioning_channels=conditioning_channels,
             shading_hint_channels=shading_hint_channels,
+            num_res_blocks=encoder_res_blocks,
         )
 
         self.down_blocks = nn.ModuleList([])
@@ -508,6 +489,7 @@ class NeuralTextureControlNetModel(ControlNetModel):
         load_weights_from_unet: bool = True,
         shading_hint_channels: int = 12,
         conditioning_channels: int = 4,
+        encoder_res_blocks: int = 4,
     ):
         r"""
         Instantiate a [`ControlNetModel`] from [`UNet2DConditionModel`].
@@ -572,6 +554,7 @@ class NeuralTextureControlNetModel(ControlNetModel):
             conditioning_embedding_out_channels=conditioning_embedding_out_channels,
             shading_hint_channels=shading_hint_channels,
             conditioning_channels=conditioning_channels,
+            encoder_res_blocks=encoder_res_blocks,
         )
 
         if load_weights_from_unet:

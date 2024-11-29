@@ -714,6 +714,14 @@ def parse_args(input_args=None):
         default=0.0,
         help="Proportion of channel augmentation.",
     )
+
+    parser.add_argument(
+        "--condition_encoder_res_blocks",
+        type=int,
+        default=4,
+        help="Number of residual blocks in the conditioning encoder.",
+    )
+
     parser.add_argument(
         "--log_encode_hint",
         action="store_true",
@@ -1022,6 +1030,7 @@ def main(args):
             args.controlnet_model_name_or_path,
             shading_hint_channels=args.shading_hint_channels,
             conditioning_channels=conditioning_channels,
+            encoder_res_blocks=args.condition_encoder_res_blocks,
         )
     else:
         logger.info("Initializing controlnet weights from unet")
@@ -1029,6 +1038,7 @@ def main(args):
             unet,
             shading_hint_channels=args.shading_hint_channels,
             conditioning_channels=conditioning_channels,
+            encoder_res_blocks=args.condition_encoder_res_blocks,
         )
         logger.info("Controlnet initialized from unet")
 
